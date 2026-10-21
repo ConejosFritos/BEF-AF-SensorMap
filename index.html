@@ -1,0 +1,1709 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Soil Sensor Tracker</title>
+<style>
+  :root{
+    --bg:#0d1117;
+    --panel:#151b23;
+    --panel-2:#1b222c;
+    --border:#28313d;
+    --border-soft:#202836;
+    --text:#e6edf3;
+    --muted:#8b98a5;
+    --accent:#4c9aff;
+    --accent-dim:#1f3a5f;
+    --good:#2ea043;
+    --needs:#d29922;
+    --faulty:#f85149;
+    --unknown:#6e7681;
+    --radius:10px;
+    --shadow:0 8px 24px rgba(0,0,0,.45);
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--text);
+    font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-text-size-adjust:100%;
+    overflow:hidden;
+  }
+  button,input,select,textarea{font:inherit;color:inherit}
+  button{
+    background:var(--panel-2);
+    border:1px solid var(--border);
+    border-radius:8px;
+    padding:7px 11px;
+    cursor:pointer;
+    white-space:nowrap;
+    transition:background .12s,border-color .12s,transform .06s;
+  }
+  button:hover{background:#232c38;border-color:#3a4654}
+  button:active{transform:translateY(1px)}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#07131f;font-weight:600}
+  button.primary:hover{background:#63a9ff}
+  button.active{background:var(--accent-dim);border-color:var(--accent);color:#cfe4ff}
+  button.danger:hover{background:#3d1d1d;border-color:#f85149;color:#ffb3ae}
+  button.icon{padding:6px 9px;line-height:1}
+  input[type=text],input[type=number],input[type=date],select,textarea{
+    background:var(--bg);
+    border:1px solid var(--border);
+    border-radius:6px;
+    padding:5px 7px;
+    width:100%;
+    min-width:0;
+  }
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px rgba(76,154,255,.18)}
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-thumb{background:#2c3543;border-radius:8px;border:2px solid var(--bg)}
+  ::-webkit-scrollbar-track{background:transparent}
+
+  /* ---------- layout ---------- */
+  #app{display:flex;flex-direction:column;height:100%}
+
+  header{
+    display:flex;align-items:center;gap:10px;
+    padding:9px 12px;
+    background:var(--panel);
+    border-bottom:1px solid var(--border);
+    flex-wrap:wrap;
+  }
+  .brand{display:flex;align-items:center;gap:9px;font-weight:700;letter-spacing:.2px;margin-right:4px}
+  .brand .dot{width:12px;height:12px;border-radius:50%;background:var(--good);box-shadow:0 0 0 3px rgba(46,160,67,.18)}
+  .brand small{color:var(--muted);font-weight:500}
+  .spacer{flex:1}
+  .btnrow{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+  .sep{width:1px;height:24px;background:var(--border);margin:0 3px}
+
+  main{
+    flex:1;
+    display:grid;
+    grid-template-columns:minmax(0,1fr) 7px var(--table-w,44%);
+    min-height:0;
+  }
+  @media (max-width:980px){
+    main{grid-template-columns:1fr;grid-template-rows:minmax(240px,45%) minmax(0,1fr)}
+    #splitter{display:none}
+  }
+  #splitter{
+    background:var(--border);cursor:col-resize;position:relative;
+  }
+  #splitter::after{
+    content:"";position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+    width:3px;height:34px;border-radius:2px;background:#4a5563;
+  }
+  #splitter:hover,#splitter.dragging{background:var(--accent)}
+  #splitter:hover::after,#splitter.dragging::after{background:#cfe4ff}
+
+  /* ---------- map ---------- */
+  #mapPanel{position:relative;display:flex;flex-direction:column;min-width:0;min-height:0;background:#090c10}
+  #viewport{
+    position:relative;flex:1;overflow:hidden;cursor:grab;
+    background-color:#090c10;
+    background-image:linear-gradient(45deg,#0d1117 25%,transparent 25%,transparent 75%,#0d1117 75%),
+                     linear-gradient(45deg,#0d1117 25%,transparent 25%,transparent 75%,#0d1117 75%);
+    background-size:24px 24px;
+    background-position:0 0,12px 12px;
+    touch-action:none;
+    user-select:none;
+  }
+  #viewport.panning{cursor:grabbing}
+  #viewport.placing{cursor:crosshair}
+  #mapImage{position:absolute;left:0;top:0;transform-origin:0 0;box-shadow:0 0 0 1px rgba(255,255,255,.06)}
+  #markerLayer{position:absolute;inset:0;pointer-events:none}
+  .marker{
+    position:absolute;width:30px;height:30px;margin:-15px 0 0 -15px;
+    padding:0;border:none;background:none;border-radius:50%;
+    pointer-events:auto;cursor:pointer;display:grid;place-items:center;
+  }
+  .marker .ring{
+    width:22px;height:22px;border-radius:50%;
+    background:var(--c,var(--unknown));
+    border:2px solid rgba(0,0,0,.55);
+    box-shadow:0 2px 6px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.25);
+    display:grid;place-items:center;
+    font-size:10px;font-weight:700;color:#08131d;
+    transition:transform .12s ease;
+  }
+  .marker:hover .ring{transform:scale(1.18)}
+  .marker.selected .ring{transform:scale(1.32);box-shadow:0 0 0 3px #fff,0 0 0 6px rgba(76,154,255,.6),0 3px 10px rgba(0,0,0,.6)}
+  .marker.flash .ring{animation:flash .85s ease-out 2}
+  @keyframes flash{
+    0%{box-shadow:0 0 0 0 rgba(76,154,255,.9),0 0 0 2px rgba(76,154,255,.5)}
+    100%{box-shadow:0 0 0 22px rgba(76,154,255,0),0 0 0 2px rgba(76,154,255,0)}
+  }
+  .marker .tag{
+    position:absolute;top:26px;left:50%;transform:translateX(-50%);
+    font-size:10px;padding:1px 5px;border-radius:5px;white-space:nowrap;
+    background:rgba(8,12,18,.88);border:1px solid rgba(255,255,255,.14);
+    color:#dfe7ef;pointer-events:none;
+  }
+  .marker .tag:empty{display:none}
+
+  #tooltip{
+    position:fixed;z-index:60;pointer-events:none;display:none;
+    background:rgba(10,14,20,.96);border:1px solid var(--border);
+    border-radius:8px;padding:7px 9px;box-shadow:var(--shadow);
+    font-size:12px;max-width:240px;
+  }
+  #tooltip b{display:block;margin-bottom:3px;font-size:12.5px}
+  #tooltip .row{display:flex;justify-content:space-between;gap:14px;color:var(--muted)}
+  #tooltip .row span:last-child{color:var(--text)}
+
+  .hud{position:absolute;z-index:20;display:flex;gap:6px;align-items:center}
+  #hudTL{top:10px;left:10px;flex-direction:column;align-items:flex-start}
+  #hudTR{top:10px;right:10px;flex-direction:column;align-items:flex-end}
+  #hudBL{bottom:10px;left:10px}
+  #hudBR{bottom:10px;right:10px;flex-direction:column;align-items:flex-end;gap:5px}
+  .glass{
+    background:rgba(15,20,27,.86);backdrop-filter:blur(8px);
+    border:1px solid var(--border);border-radius:8px;
+  }
+  .glass.pad{padding:7px 9px}
+  .stack{display:flex;flex-direction:column;gap:6px}
+  #mapName{font-size:12px;color:var(--muted);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #coords{font:11px/1.3 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:var(--muted)}
+  .legend{display:flex;flex-direction:column;gap:4px;font-size:11.5px}
+  .legend div{display:flex;align-items:center;gap:6px}
+  .legend i{width:10px;height:10px;border-radius:50%;display:inline-block}
+
+  #dropOverlay{
+    position:absolute;inset:0;z-index:40;display:none;place-items:center;
+    background:rgba(76,154,255,.12);border:3px dashed var(--accent);border-radius:12px;
+    font-size:17px;font-weight:600;color:#cfe4ff;pointer-events:none;
+  }
+  #emptyMap{
+    position:absolute;inset:0;display:grid;place-items:center;text-align:center;padding:24px;z-index:30;
+  }
+  #emptyMap .card{
+    background:var(--panel);border:1px solid var(--border);border-radius:14px;
+    padding:26px 30px;max-width:440px;box-shadow:var(--shadow);
+  }
+  #emptyMap h2{margin:0 0 8px;font-size:18px}
+  #emptyMap p{color:var(--muted);margin:0 0 16px;font-size:13px}
+
+  #toast{
+    position:fixed;left:50%;bottom:22px;transform:translate(-50%,20px);
+    background:var(--panel-2);border:1px solid var(--border);border-radius:9px;
+    padding:9px 15px;box-shadow:var(--shadow);z-index:90;
+    opacity:0;pointer-events:none;transition:opacity .18s,transform .18s;
+    max-width:90vw;text-align:center;
+  }
+  #toast.show{opacity:1;transform:translate(-50%,0)}
+
+  /* ---------- table ---------- */
+  #tablePanel{display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--panel);border-left:1px solid var(--border)}
+  @media (max-width:980px){
+    #tablePanel{border-left:none;border-top:1px solid var(--border)}
+    header{gap:8px;padding:6px 8px;flex-wrap:nowrap;flex-wrap:nowrap}
+    .brand{font-size:13px;flex:none;margin-right:0}
+    .brand small{display:none}
+    .btnrow{
+      flex:1 1 auto;min-width:0;flex-wrap:nowrap;overflow-x:auto;
+      scrollbar-width:none;-webkit-overflow-scrolling:touch;padding-bottom:1px;
+    }
+    .btnrow::-webkit-scrollbar{display:none}
+    .btnrow button{flex:none;font-size:12.5px;padding:6px 9px}
+    .sep{display:none}
+  }
+  #summary{display:flex;gap:6px;padding:9px 10px;border-bottom:1px solid var(--border-soft);flex-wrap:wrap;align-items:center}
+  .chip{
+    display:inline-flex;align-items:center;gap:6px;
+    background:var(--panel-2);border:1px solid var(--border);border-radius:999px;
+    padding:4px 10px;font-size:12px;cursor:pointer;user-select:none;
+  }
+  .chip:hover{border-color:#3a4654}
+  .chip.on{background:var(--accent-dim);border-color:var(--accent);color:#cfe4ff}
+  .chip b{font-variant-numeric:tabular-nums}
+  .chip i{width:9px;height:9px;border-radius:50%;display:inline-block}
+  .chip.static{cursor:default}
+
+  #toolrow{display:flex;gap:6px;padding:8px 10px;border-bottom:1px solid var(--border-soft);align-items:center;flex-wrap:wrap}
+  #search{flex:1;min-width:130px}
+  .count{color:var(--muted);font-size:12px;white-space:nowrap;font-variant-numeric:tabular-nums}
+
+  #tableWrap{flex:1;overflow:auto;min-height:0}
+  table{border-collapse:separate;border-spacing:0;width:100%;font-size:13px}
+  thead th{
+    position:sticky;top:0;z-index:5;background:var(--panel-2);
+    border-bottom:1px solid var(--border);
+    text-align:left;padding:0;white-space:nowrap;
+  }
+  thead th .sortbtn{
+    width:100%;background:none;border:none;border-radius:0;padding:8px 9px;
+    display:flex;align-items:center;gap:5px;font-weight:600;font-size:12px;color:var(--muted);
+  }
+  thead th .sortbtn:hover{background:#232c38;color:var(--text)}
+  thead th.num .sortbtn{justify-content:flex-end}
+  thead th .arrow{opacity:.3;font-size:9px}
+  thead th.sorted .sortbtn{color:var(--text)}
+  thead th.sorted .arrow{opacity:1;color:var(--accent)}
+  tbody td{padding:3px 6px;border-bottom:1px solid var(--border-soft);vertical-align:middle}
+  tbody td.num{text-align:right}
+  tbody tr:hover td{background:#1b2430}
+  tbody tr.selected td{background:rgba(76,154,255,.15)}
+  tbody tr.selected td:first-child{box-shadow:inset 3px 0 0 var(--accent)}
+  tbody tr{cursor:pointer}
+  td.idx{width:44px;text-align:center;color:var(--muted);font-variant-numeric:tabular-nums}
+  tr.unplaced td.idx::after{content:"?";color:var(--needs)}
+  td.acts{width:62px;white-space:nowrap}
+  td.acts button{padding:3px 6px;font-size:11px;line-height:1.2}
+  .cell-input{border-color:transparent;background:transparent}
+  .cell-input:hover{border-color:var(--border);background:var(--bg)}
+  .cell-input:focus{background:var(--bg)}
+  .batt{display:flex;align-items:center;gap:6px;justify-content:flex-end}
+  .batt .bar{width:44px;height:6px;border-radius:4px;background:#232c38;overflow:hidden;flex:none}
+  .batt .bar i{display:block;height:100%;background:var(--good);transition:width .15s}
+  .cond{display:inline-flex;align-items:center;padding:2px 4px;border-radius:999px;border:1px solid transparent}
+  .cond.c-good{color:#6fd47f;background:rgba(46,160,67,.16);border-color:rgba(46,160,67,.4)}
+  .cond.c-needs{color:#e3b341;background:rgba(210,153,34,.16);border-color:rgba(210,153,34,.4)}
+  .cond.c-faulty{color:#ff7b72;background:rgba(248,81,73,.16);border-color:rgba(248,81,73,.4)}
+  .cond.c-unknown{color:#9aa5b1;background:rgba(110,118,129,.18);border-color:rgba(110,118,129,.45)}
+  .cond.c-other{color:#79c0ff;background:rgba(56,139,253,.16);border-color:rgba(56,139,253,.4)}
+  .cond select.cond-select{
+    background:transparent;border:none;color:inherit;font-weight:600;font-size:12px;
+    padding:2px 4px;width:auto;cursor:pointer;
+  }
+  .cond select.cond-select:hover{background:rgba(255,255,255,.07)}
+  #emptyTable{padding:34px 20px;text-align:center;color:var(--muted)}
+
+  /* ---------- modal ---------- */
+  #modalBack{
+    position:fixed;inset:0;z-index:100;display:none;
+    background:rgba(3,6,10,.65);backdrop-filter:blur(3px);
+    align-items:center;justify-content:center;padding:20px;
+  }
+  #modalBack.show{display:flex}
+  .modal{
+    background:var(--panel);border:1px solid var(--border);border-radius:14px;
+    box-shadow:var(--shadow);width:100%;max-width:700px;max-height:88vh;display:flex;flex-direction:column;
+  }
+  .modal header{background:none;border:none;padding:14px 16px 10px;border-bottom:1px solid var(--border-soft)}
+  .modal header h3{margin:0;font-size:15px}
+  .modal .body{padding:14px 16px;overflow:auto}
+  .modal footer{padding:11px 16px;border-top:1px solid var(--border-soft);display:flex;gap:8px;justify-content:flex-end}
+  .colrow{display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border-soft)}
+  .colrow select.type{width:110px;flex:none}
+  .colrow input.name{flex:1}
+  .colrow .opt{flex:1.3}
+  .hint{color:var(--muted);font-size:12px;margin:6px 0 14px}
+  kbd{background:var(--panel-2);border:1px solid var(--border);border-bottom-width:2px;border-radius:4px;padding:1px 5px;font:11px ui-monospace,monospace}
+  .helpgrid{display:grid;grid-template-columns:auto 1fr;gap:9px 14px;align-items:baseline;font-size:13px;margin:0}
+  .helpgrid dt{text-align:right;color:var(--muted);white-space:nowrap}
+  .helpgrid dd{margin:0}
+  #banner{
+    display:none;padding:8px 12px;background:#1f2a1c;border-bottom:1px solid #2d3f28;
+    font-size:12.5px;color:#c8e6c0;align-items:center;gap:10px;
+  }
+  #banner.show{display:flex}
+
+  @media print{
+    header,#mapPanel,#summary,#toolrow,#toast,#banner,.hud{display:none !important}
+    body,html{height:auto;overflow:visible;background:#fff;color:#000}
+    main{display:block}
+    #tablePanel{border:none;background:#fff}
+    #tableWrap{overflow:visible}
+    table{font-size:11px}
+    thead th{background:#eee !important;color:#000}
+    tbody td{border-bottom:1px solid #bbb}
+    .cell-input{border:none !important;background:transparent !important;color:#000}
+    .cond{background:none !important;color:#000 !important;border-color:#999 !important}
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="brand"><span class="dot"></span>Soil Sensor Tracker <small id="saveState"></small></div>
+    <div class="btnrow">
+      <button id="btnUpload" title="Upload a map image (or drop one onto the map)">Upload map</button>
+      <button id="btnAdd" title="Add a sensor marker (shortcut: A)">＋ Add sensor</button>
+      <button id="btnFit" title="Fit map to window (F)">Fit</button>
+      <button id="btnGrid" title="Toggle coordinate grid (G)">Grid</button>
+      <div class="sep"></div>
+      <button id="btnCols" title="Configure table columns">Columns</button>
+      <button id="btnPrev" title="Previous sensor (←)">◀</button>
+      <button id="btnNext" title="Next sensor (→)">▶</button>
+      <div class="sep"></div>
+      <button id="btnCsv">Export CSV</button>
+      <button id="btnProject">Save project</button>
+      <button id="btnImport">Open project</button>
+      <button id="btnHtml" title="Export a single self-contained HTML file">Export HTML</button>
+      <button id="btnPrint">Print</button>
+      <button id="btnHelp" title="Help">?</button>
+    </div>
+    <input type="file" id="fileMap" accept="image/*" hidden />
+    <input type="file" id="fileProject" accept="application/json,.json" hidden />
+  </header>
+
+  <div id="banner">
+    <span id="bannerMsg"></span>
+    <div class="spacer"></div>
+  </div>
+
+  <main>
+    <section id="mapPanel">
+      <div id="viewport">
+        <img id="mapImage" alt="Plot map" style="display:none" />
+        <div id="markerLayer"></div>
+        <div id="emptyMap">
+          <div class="card">
+            <h2>Load your plot map</h2>
+            <p>Upload a plot map, drone photo or hand-drawn sketch. Then press <b>＋ Add sensor</b> and click each sensor location.<br/>Drag any marker to fine-tune it.</p>
+            <button class="primary" id="btnUpload2">Upload map image</button>
+          </div>
+        </div>
+        <div id="dropOverlay">Drop map image here</div>
+      </div>
+
+      <div class="hud" id="hudTL">
+        <div class="glass pad stack" style="align-items:flex-start">
+          <div id="mapName">No map loaded</div>
+          <div id="coords">–</div>
+        </div>
+      </div>
+      <div class="hud" id="hudTR">
+        <div class="stack">
+          <button class="glass icon" id="btnZoomIn" title="Zoom in">＋</button>
+          <button class="glass icon" id="btnZoomOut" title="Zoom out">－</button>
+          <button class="glass icon" id="btnGrid2" title="Toggle coordinate grid">▦</button>
+        </div>
+      </div>
+      <div class="hud" id="hudBL">
+        <div class="glass pad legend">
+          <div><i style="background:var(--good)"></i>Good</div>
+          <div><i style="background:var(--needs)"></i>Needs battery</div>
+          <div><i style="background:var(--faulty)"></i>Faulty</div>
+          <div><i style="background:var(--unknown)"></i>Not checked</div>
+        </div>
+      </div>
+      <div class="hud" id="hudBR">
+        <div class="glass pad" id="zoomLabel">100%</div>
+      </div>
+    </section>
+
+    <div id="splitter" title="Drag to resize"></div>
+
+    <section id="tablePanel">
+      <div id="summary"></div>
+      <div id="toolrow">
+        <input type="text" id="search" placeholder="Search sensors…" />
+        <button id="btnSortDefault" title="Clear sorting">Reset sort</button>
+        <span class="count" id="count"></span>
+      </div>
+      <div id="tableWrap">
+        <table>
+          <thead><tr id="theadRow"></tr></thead>
+          <tbody id="tbody"></tbody>
+        </table>
+        <div id="emptyTable">No sensors yet. Upload a map and click <b>＋ Add sensor</b>.</div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div id="tooltip"></div>
+<div id="toast"></div>
+
+<div id="modalBack">
+  <div class="modal" id="modal">
+    <header><h3 id="modalTitle"></h3></header>
+    <div class="body" id="modalBody"></div>
+    <footer id="modalFoot"></footer>
+  </div>
+</div>
+
+<script>
+"use strict";
+(function(){
+
+/* ============================================================
+   Constants
+   ============================================================ */
+const STORAGE_KEY = "soilSensorTracker.v1";
+const MAP_KEY = "soilSensorTracker.map";
+const IDB_NAME = "soil-sensor-tracker";
+const IDB_STORE = "files";
+
+const CONDITIONS = ["Good", "Needs Battery", "Faulty", "Not Checked"];
+const BATTERY_TYPES = ["AA", "AAA", "CR2032", "CR123A", "CR2450", "D cell", "Li-SOCl2 3.6V", "Solar", "Other"];
+
+const DEFAULT_COLUMNS = [
+  { key:"sensorId",    label:"Sensor ID",       type:"text",   width:120, visible:true, locked:true },
+  { key:"location",    label:"Location / Zone", type:"text",   width:170, visible:true, locked:true },
+  { key:"batteryType", label:"Battery",         type:"select", width:130, visible:true, locked:true, options:BATTERY_TYPES.slice() },
+  { key:"batteryPct",  label:"Battery %",       type:"number", width:110, visible:true, locked:true, numeric:true },
+  { key:"condition",   label:"Condition",       type:"select", width:140, visible:true, locked:true, options:CONDITIONS.slice() },
+  { key:"lastInspected",label:"Last inspected", type:"date",   width:140, visible:true, locked:true },
+  { key:"notes",       label:"Notes",           type:"text",   width:220, visible:true, locked:true }
+];
+
+const STATUS = {
+  good:    { label:"Good",          color:"#2ea043" },
+  needs:   { label:"Needs Battery", color:"#d29922" },
+  faulty:  { label:"Faulty",        color:"#f85149" },
+  unknown: { label:"Not Checked",   color:"#6e7681" },
+  other:   { label:"Other",         color:"#388bfd" }
+};
+const LOW_BATTERY = 20;
+
+/* ============================================================
+   State
+   ============================================================ */
+const state = {
+  map: null,            // {name, dataUrl, w, h}
+  points: [],           // {id, x, y (normalised 0..1, or null), cols:{key:value}}
+  columns: cloneColumns(DEFAULT_COLUMNS),
+  view: { tx:0, ty:0, scale:1 },
+  selectedId: null,
+  filter: { text:"", condition:"all" },
+  sort: { key:null, dir:1 },
+  placing: false,
+  locateTarget: null,
+  gridOn: false,
+  userAdjusted: false
+};
+
+function cloneColumns(cols){
+  return cols.map(c => ({
+    key:c.key, label:c.label, type:c.type, width:c.width || 140,
+    visible:c.visible !== false, locked:!!c.locked,
+    numeric:!!c.numeric,
+    options:c.options ? c.options.slice() : undefined
+  }));
+}
+/* Columns removed after v1 — dropped from saved settings and imported projects
+   so old data doesn't resurrect them. */
+const REMOVED_COLUMN_KEYS = ["depth"];
+function adoptColumns(cols){
+  const list = cols && cols.length ? cloneColumns(cols) : cloneColumns(DEFAULT_COLUMNS);
+  return list.filter(c => !REMOVED_COLUMN_KEYS.includes(c.key));
+}
+let uid = 1;
+function nextId(){ return "p" + Date.now().toString(36) + "_" + (uid++).toString(36); }
+
+/* ============================================================
+   DOM
+   ============================================================ */
+const $ = s => document.querySelector(s);
+const viewport = $("#viewport"), mapImage = $("#mapImage"), markerLayer = $("#markerLayer");
+const tbody = $("#tbody"), theadRow = $("#theadRow"), tooltip = $("#tooltip"), toastEl = $("#toast");
+const countEl = $("#count"), summaryEl = $("#summary"), saveStateEl = $("#saveState");
+let gridEl = null;
+
+/* ============================================================
+   Utilities
+   ============================================================ */
+function toast(msg, ms){
+  toastEl.textContent = msg;
+  toastEl.classList.add("show");
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => toastEl.classList.remove("show"), ms || 2600);
+}
+function uidKey(){ return "c_" + Math.random().toString(36).slice(2,9); }
+function clamp(v,a,b){ return v < a ? a : v > b ? b : v; }
+function esc(s){
+  return String(s == null ? "" : s).replace(/[&<>"']/g, c =>
+    ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+}
+function fmtDate(d){
+  if(!d) return "";
+  const dt = new Date(d);
+  if(isNaN(dt)) return "";
+  return dt.toISOString().slice(0,10);
+}
+function today(){ return fmtDate(new Date()); }
+function statusOf(condition){
+  const c = String(condition || "").toLowerCase();
+  if(!c || c.includes("not") || c.includes("unchecked") || c.includes("unknown")) return "unknown";
+  if(c.includes("fault") || c.includes("bad") || c.includes("fail")) return "faulty";
+  if(c.includes("batt") || c.includes("charge") || c.includes("due")) return "needs";
+  if(c.includes("good") || c === "ok" || c.includes("fine")) return "good";
+  return "other";
+}
+function num(v){
+  if(v === "" || v === null || v === undefined) return null;
+  const n = Number(v);
+  return isFinite(n) ? n : null;
+}
+
+/* ============================================================
+   Storage: localStorage (data) + IndexedDB (map image)
+   ============================================================ */
+let idb = null, idbFailed = false;
+function openIdb(){
+  return new Promise(resolve => {
+    if(idb) return resolve(idb);
+    if(idbFailed) return resolve(null);
+    let req;
+    try{ req = indexedDB.open(IDB_NAME, 1); }
+    catch(e){ idbFailed = true; return resolve(null); }
+    req.onupgradeneeded = () => { try{ req.result.createObjectStore(IDB_STORE); }catch(e){} };
+    req.onsuccess = () => { idb = req.result; resolve(idb); };
+    req.onerror = () => { idbFailed = true; resolve(null); };
+    setTimeout(() => resolve(idb), 2000);
+  });
+}
+async function idbSet(key, value){
+  const db = await openIdb();
+  if(!db) return false;
+  return new Promise(resolve => {
+    try{
+      const tx = db.transaction(IDB_STORE, "readwrite");
+      tx.objectStore(IDB_STORE).put(value, key);
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => resolve(false);
+      tx.onabort = () => resolve(false);
+    }catch(e){ resolve(false); }
+  });
+}
+async function idbGet(key){
+  const db = await openIdb();
+  if(!db) return null;
+  return new Promise(resolve => {
+    try{
+      const tx = db.transaction(IDB_STORE, "readonly");
+      const r = tx.objectStore(IDB_STORE).get(key);
+      r.onsuccess = () => resolve(r.result || null);
+      r.onerror = () => resolve(null);
+    }catch(e){ resolve(null); }
+  });
+}
+async function persistMap(map){
+  if(await idbSet("map", map)) return true;
+  try{
+    localStorage.setItem(MAP_KEY, JSON.stringify(map));
+    return true;
+  }catch(e){
+    return false;
+  }
+}
+async function readPersistedMap(){
+  const m = await idbGet("map");
+  if(m && m.dataUrl) return m;
+  try{
+    const raw = localStorage.getItem(MAP_KEY);
+    if(raw){ const p = JSON.parse(raw); if(p && p.dataUrl) return p; }
+  }catch(e){}
+  return null;
+}
+
+let saveTimer = null;
+function save(){
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(doSave, 350);
+}
+function doSave(){
+  try{
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      points: state.points,
+      columns: state.columns,
+      gridOn: state.gridOn,
+      mapMeta: state.map ? { name:state.map.name, w:state.map.w, h:state.map.h } : null
+    }));
+    setSaveState("saved");
+  }catch(e){
+    setSaveState("save failed");
+    toast("Could not save to browser storage. Use “Save project” to export a file.");
+  }
+}
+function setSaveState(txt){ saveStateEl.textContent = txt ? "· " + txt : ""; }
+
+function loadLocal(){
+  let raw = null;
+  try{ raw = localStorage.getItem(STORAGE_KEY); }catch(e){}
+  if(!raw) return null;
+  try{ return JSON.parse(raw); }catch(e){ return null; }
+}
+
+/* ============================================================
+   Map: image loading, view transform
+   ============================================================ */
+function setMap(mapObj, dataUrl){
+  state.map = Object.assign({}, mapObj);
+  if(dataUrl) state.map.dataUrl = dataUrl;
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      state.map.w = img.naturalWidth;
+      state.map.h = img.naturalHeight;
+      mapImage.src = state.map.dataUrl;
+      mapImage.style.display = "block";
+      mapImage.style.width = state.map.w + "px";
+      mapImage.style.height = state.map.h + "px";
+      $("#emptyMap").style.display = "none";
+      $("#mapName").textContent = state.map.name + " · " + state.map.w + "×" + state.map.h;
+      fitView();
+      drawGrid();
+      renderAll();
+      resolve();
+    };
+    img.onerror = () => { toast("That image could not be read."); resolve(); };
+    img.src = state.map.dataUrl;
+  });
+}
+
+function fitView(){
+  if(!state.map) return;
+  const r = viewport.getBoundingClientRect();
+  const pad = 24;
+  const s = Math.min((r.width - pad) / state.map.w, (r.height - pad) / state.map.h);
+  state.view.scale = s > 0 ? s : 1;
+  state.view.tx = (r.width - state.map.w * state.view.scale) / 2;
+  state.view.ty = (r.height - state.map.h * state.view.scale) / 2;
+  state.userAdjusted = false;
+  applyView();
+}
+
+function applyView(){
+  if(!state.map) return;
+  const v = state.view;
+  const tf = "translate(" + v.tx + "px," + v.ty + "px) scale(" + v.scale + ")";
+  mapImage.style.transform = tf;
+  if(gridEl) gridEl.style.transform = tf;
+  positionMarkers();
+  $("#zoomLabel").textContent = Math.round(v.scale * 100) + "%";
+}
+
+function screenToMap(clientX, clientY){
+  const r = viewport.getBoundingClientRect();
+  return {
+    x:(clientX - r.left - state.view.tx) / state.view.scale,
+    y:(clientY - r.top  - state.view.ty) / state.view.scale
+  };
+}
+
+/* ============================================================
+   Markers
+   ============================================================ */
+function makePoint(nx, ny){
+  const p = { id: nextId(), x:nx, y:ny, cols:{} };
+  state.columns.forEach(c => {
+    if(c.key === "condition") p.cols.condition = "Not Checked";
+    else if(c.key === "batteryType") p.cols.batteryType = BATTERY_TYPES[0];
+    else p.cols[c.key] = "";
+  });
+  return p;
+}
+function pointById(id){ return state.points.find(p => p.id === id); }
+function pointIndex(p){ return state.points.indexOf(p); }
+
+function renderMarkers(){
+  markerLayer.innerHTML = "";
+  if(!state.map) return;
+  state.points.forEach((p, i) => {
+    if(p.x === null || p.y === null) return;
+    const btn = document.createElement("button");
+    btn.className = "marker";
+    btn.dataset.id = p.id;
+    btn.title = p.cols.sensorId || p.cols.location || ("Sensor " + (i + 1));
+    btn.setAttribute("aria-label", btn.title);
+    btn.style.setProperty("--c", STATUS[statusOf(p.cols.condition)].color);
+    const ring = document.createElement("span");
+    ring.className = "ring";
+    ring.textContent = String(i + 1);
+    btn.appendChild(ring);
+    const tag = document.createElement("span");
+    tag.className = "tag";
+    tag.textContent = p.cols.sensorId || p.cols.location || "";
+    btn.appendChild(tag);
+    markerLayer.appendChild(btn);
+  });
+  positionMarkers();
+}
+function positionMarkers(){
+  if(!state.map) return;
+  const v = state.view, sel = state.selectedId;
+  const kids = markerLayer.children;
+  for(let i = 0; i < kids.length; i++){
+    const el = kids[i];
+    const p = pointById(el.dataset.id);
+    if(!p) continue;
+    el.style.left = (v.tx + p.x * state.map.w * v.scale) + "px";
+    el.style.top  = (v.ty + p.y * state.map.h * v.scale) + "px";
+    el.classList.toggle("selected", p.id === sel);
+  }
+}
+function updateMarkerStyle(id){
+  const el = markerLayer.querySelector('.marker[data-id="' + id + '"]');
+  const p = pointById(id);
+  if(!el || !p) return;
+  el.style.setProperty("--c", STATUS[statusOf(p.cols.condition)].color);
+  const tag = el.querySelector(".tag");
+  if(tag) tag.textContent = p.cols.sensorId || p.cols.location || "";
+  const ring = el.querySelector(".ring");
+  if(ring) ring.textContent = String(pointIndex(p) + 1);
+}
+
+/* ============================================================
+   Selection & cross-highlighting
+   ============================================================ */
+function selectPoint(id, opts){
+  opts = opts || {};
+  state.selectedId = id;
+  const p = pointById(id);
+
+  tbody.querySelectorAll("tr").forEach(tr => tr.classList.toggle("selected", tr.dataset.id === id));
+  markerLayer.querySelectorAll(".marker").forEach(el => el.classList.toggle("selected", el.dataset.id === id));
+
+  if(!p) return;
+  if(opts.flash !== false){
+    const el = markerLayer.querySelector('.marker[data-id="' + id + '"]');
+    if(el){ el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash"); }
+  }
+  if(opts.scroll !== false){
+    const row = tbody.querySelector('tr[data-id="' + id + '"]');
+    if(row && row.scrollIntoView) row.scrollIntoView({ block:"nearest", behavior:"smooth" });
+  }
+  if(opts.pan !== false && p.x !== null && state.map) panToPoint(p);
+}
+function panToPoint(p){
+  const r = viewport.getBoundingClientRect();
+  const s = state.view.scale;
+  const x = p.x * state.map.w * s, y = p.y * state.map.h * s;
+  let tx = state.view.tx, ty = state.view.ty;
+  const pad = 90;
+  if(x + tx < pad || x + tx > r.width - pad || y + ty < pad || y + ty > r.height - pad){
+    tx = r.width / 2 - x;
+    ty = r.height / 2 - y;
+    state.userAdjusted = true;
+  }
+  animateTo(tx, ty, state.view.scale);
+}
+let animRaf = null;
+function animateTo(tx, ty, scale){
+  cancelAnimationFrame(animRaf);
+  const v = state.view;
+  const s0 = { tx:v.tx, ty:v.ty, sc:v.scale };
+  const t0 = performance.now(), dur = 260;
+  function step(now){
+    const k = Math.min(1, (now - t0) / dur);
+    const e = 1 - Math.pow(1 - k, 3);
+    v.tx = s0.tx + (tx - s0.tx) * e;
+    v.ty = s0.ty + (ty - s0.ty) * e;
+    v.scale = s0.sc + (scale - s0.sc) * e;
+    applyView();
+    if(k < 1) animRaf = requestAnimationFrame(step);
+  }
+  animRaf = requestAnimationFrame(step);
+}
+function zoomAt(factor, cx, cy){
+  if(!state.map) return;
+  cancelAnimationFrame(animRaf);
+  const r = viewport.getBoundingClientRect();
+  if(cx === undefined){ cx = r.width / 2; cy = r.height / 2; }
+  const v = state.view;
+  const mx = (cx - v.tx) / v.scale, my = (cy - v.ty) / v.scale;
+  const ns = clamp(v.scale * factor, 0.02, 30);
+  v.scale = ns;
+  v.tx = cx - mx * ns;
+  v.ty = cy - my * ns;
+  state.userAdjusted = true;
+  applyView();
+}
+
+/* ============================================================
+   Table rendering
+   ============================================================ */
+function visibleColumns(){ return state.columns.filter(c => c.visible); }
+
+function renderHead(){
+  const cols = visibleColumns();
+  theadRow.innerHTML = "";
+  const th0 = document.createElement("th");
+  th0.innerHTML = '<div class="sortbtn" style="cursor:default"><span>#</span></div>';
+  theadRow.appendChild(th0);
+
+  cols.forEach(c => {
+    const th = document.createElement("th");
+    if(c.numeric) th.classList.add("num");
+    if(state.sort.key === c.key) th.classList.add("sorted");
+    const b = document.createElement("button");
+    b.className = "sortbtn";
+    const arrow = state.sort.key === c.key ? (state.sort.dir === 1 ? "▲" : "▼") : "▲";
+    b.innerHTML = '<span>' + esc(c.label) + '</span><span class="arrow">' + arrow + "</span>";
+    b.onclick = () => {
+      if(state.sort.key === c.key) state.sort.dir *= -1;
+      else { state.sort.key = c.key; state.sort.dir = 1; }
+      renderAll();
+    };
+    th.appendChild(b);
+    if(c.width) th.style.minWidth = c.width + "px";
+    theadRow.appendChild(th);
+  });
+
+  const thA = document.createElement("th");
+  thA.innerHTML = '<div class="sortbtn" style="cursor:default"><span>Actions</span></div>';
+  theadRow.appendChild(thA);
+}
+
+function makeEditor(p, c, extraClass){
+  const val = p.cols[c.key] !== undefined && p.cols[c.key] !== null ? p.cols[c.key] : "";
+  let el;
+  if(c.type === "select"){
+    el = document.createElement("select");
+    (c.options || []).forEach(o => {
+      const opt = document.createElement("option");
+      opt.value = o; opt.textContent = o;
+      if(String(o) === String(val)) opt.selected = true;
+      el.appendChild(opt);
+    });
+    if(val !== "" && !(c.options || []).includes(val)){
+      const opt = document.createElement("option");
+      opt.value = val; opt.textContent = val; opt.selected = true;
+      el.insertBefore(opt, el.firstChild);
+    }
+    el.onchange = () => { p.cols[c.key] = el.value; onCellChanged(p, c); };
+  }else{
+    el = document.createElement("input");
+    el.type = c.type === "number" ? "number" : c.type === "date" ? "date" : "text";
+    if(c.type === "number"){ el.step = "any"; el.inputMode = "decimal"; }
+    el.value = val;
+    el.oninput = () => { p.cols[c.key] = el.value; onCellChanged(p, c); };
+    el.onblur = () => {
+      if(c.type === "number"){
+        const n = num(el.value);
+        el.value = n === null ? "" : n;
+        p.cols[c.key] = n === null ? "" : n;
+      }
+      onCellChanged(p, c);
+    };
+  }
+  el.className = "cell-input" + (extraClass ? " " + extraClass : "");
+  el.dataset.pt = p.id;
+  el.dataset.col = c.key;
+  return el;
+}
+
+function onCellChanged(p, c){
+  if(c.key === "condition"){
+    const wrap = tbody.querySelector('tr[data-id="' + p.id + '"] .cond');
+    if(wrap) wrap.className = "cond c-" + statusOf(p.cols.condition);
+  }
+  if(c.key === "condition" || c.key === "sensorId" || c.key === "location") updateMarkerStyle(p.id);
+  if(c.key === "batteryPct") updateBatteryBar(p);
+  renderSummary();
+  save();
+}
+
+function updateBatteryBar(p){
+  const row = tbody.querySelector('tr[data-id="' + p.id + '"]');
+  if(!row) return;
+  const fill = row.querySelector(".batt .bar i");
+  if(!fill) return;
+  const n = num(p.cols.batteryPct);
+  const v = n === null ? 0 : clamp(n, 0, 100);
+  fill.style.width = v + "%";
+  fill.style.background = v <= LOW_BATTERY ? "var(--faulty)" : v <= 40 ? "var(--needs)" : "var(--good)";
+}
+
+function filteredPoints(){
+  const cols = visibleColumns();
+  let list = state.points.slice();
+  const f = state.filter;
+  if(f.condition === "low"){
+    list = list.filter(p => { const n = num(p.cols.batteryPct); return n !== null && n <= LOW_BATTERY; });
+  }else if(f.condition !== "all"){
+    list = list.filter(p => statusOf(p.cols.condition) === f.condition);
+  }
+  if(f.text.trim()){
+    const q = f.text.trim().toLowerCase();
+    list = list.filter(p => {
+      for(const c of cols){
+        const v = p.cols[c.key];
+        if(v !== undefined && v !== null && String(v).toLowerCase().includes(q)) return true;
+      }
+      return false;
+    });
+  }
+  if(state.sort.key){
+    const c = state.columns.find(x => x.key === state.sort.key);
+    if(c){
+      const dir = state.sort.dir;
+      list.sort((a,b) => {
+        let av = a.cols[c.key], bv = b.cols[c.key];
+        if(c.type === "number"){
+          av = num(av); bv = num(bv);
+          if(av === null && bv === null) return 0;
+          if(av === null) return 1;
+          if(bv === null) return -1;
+          return (av - bv) * dir;
+        }
+        av = String(av == null ? "" : av).toLowerCase();
+        bv = String(bv == null ? "" : bv).toLowerCase();
+        if(av === bv) return 0;
+        return av < bv ? -dir : dir;
+      });
+    }
+  }
+  return list;
+}
+
+function renderBody(){
+  const cols = visibleColumns();
+  const list = filteredPoints();
+  tbody.innerHTML = "";
+  const emptyEl = $("#emptyTable");
+  if(state.points.length && !list.length){
+    emptyEl.innerHTML = "No sensors match the current filter.";
+    emptyEl.style.display = "block";
+  }else if(state.points.length){
+    emptyEl.innerHTML = "No sensors yet. Upload a map and click <b>＋ Add sensor</b>.";
+    emptyEl.style.display = "none";
+  }else{
+    emptyEl.innerHTML = "No sensors yet. Upload a map and click <b>＋ Add sensor</b>.";
+    emptyEl.style.display = "block";
+  }
+
+  list.forEach(p => {
+    const tr = document.createElement("tr");
+    tr.dataset.id = p.id;
+    if(state.selectedId === p.id) tr.classList.add("selected");
+    if(p.x === null) tr.classList.add("unplaced");
+
+    const idx = document.createElement("td");
+    idx.className = "idx";
+    idx.textContent = String(pointIndex(p) + 1);
+    tr.appendChild(idx);
+
+    cols.forEach(c => {
+      const td = document.createElement("td");
+      if(c.numeric) td.classList.add("num");
+      if(c.key === "condition"){
+        const wrap = document.createElement("div");
+        wrap.className = "cond c-" + statusOf(p.cols.condition);
+        wrap.appendChild(makeEditor(p, c, "cond-select"));
+        td.appendChild(wrap);
+      }else if(c.key === "batteryPct"){
+        const wrap = document.createElement("div");
+        wrap.className = "batt";
+        const inp = makeEditor(p, c);
+        inp.style.width = "50px";
+        const bar = document.createElement("span");
+        bar.className = "bar";
+        bar.appendChild(document.createElement("i"));
+        wrap.append(inp, bar);
+        td.appendChild(wrap);
+      }else{
+        td.appendChild(makeEditor(p, c));
+      }
+      tr.appendChild(td);
+    });
+
+    const acts = document.createElement("td");
+    acts.className = "acts";
+    if(p.x === null){
+      const b = document.createElement("button");
+      b.textContent = "Locate";
+      b.title = "Place this sensor on the map";
+      b.onclick = ev => {
+        ev.stopPropagation();
+        state.locateTarget = p.id;
+        setPlacing(true);
+        toast("Click the map to place this sensor.");
+      };
+      acts.appendChild(b);
+    }
+    const del = document.createElement("button");
+    del.textContent = "✕";
+    del.title = "Delete sensor";
+    del.className = "danger";
+    del.onclick = ev => { ev.stopPropagation(); deletePoint(p.id); };
+    acts.appendChild(del);
+    tr.appendChild(acts);
+
+    tr.addEventListener("click", () => selectPoint(p.id, { scroll:false }));
+    tbody.appendChild(tr);
+  });
+
+  state.points.forEach(updateBatteryBar);
+  countEl.textContent = state.points.length
+    ? (list.length === state.points.length ? state.points.length + " sensors" : list.length + " of " + state.points.length + " shown")
+    : "";
+}
+
+function renderSummary(){
+  const counts = { good:0, needs:0, faulty:0, unknown:0, other:0 };
+  let low = 0, inspected = 0;
+  state.points.forEach(p => {
+    const s = statusOf(p.cols.condition);
+    counts[s] = (counts[s] || 0) + 1;
+    const n = num(p.cols.batteryPct);
+    if(n !== null && n <= LOW_BATTERY) low++;
+    if(p.cols.lastInspected) inspected++;
+  });
+  const total = state.points.length;
+  summaryEl.innerHTML = "";
+  const defs = [
+    { key:"all",     label:"All",                color:"#4c9aff", n:total },
+    { key:"good",    label:"Good",               color:STATUS.good.color, n:counts.good },
+    { key:"needs",   label:"Needs battery",      color:STATUS.needs.color, n:counts.needs },
+    { key:"faulty",  label:"Faulty",             color:STATUS.faulty.color, n:counts.faulty },
+    { key:"unknown", label:"Not checked",        color:STATUS.unknown.color, n:counts.unknown },
+    { key:"low",     label:"Battery ≤ " + LOW_BATTERY + "%", color:STATUS.faulty.color, n:low }
+  ];
+  defs.forEach(d => {
+    const chip = document.createElement("div");
+    chip.className = "chip" + (state.filter.condition === d.key ? " on" : "");
+    chip.innerHTML = '<i style="background:' + d.color + '"></i>' + esc(d.label) + " <b>" + d.n + "</b>";
+    chip.onclick = () => {
+      state.filter.condition = state.filter.condition === d.key ? "all" : d.key;
+      renderAll();
+    };
+    summaryEl.appendChild(chip);
+  });
+  const prog = document.createElement("div");
+  prog.className = "chip static";
+  prog.innerHTML = "Inspected <b>" + inspected + "</b>/" + total;
+  summaryEl.appendChild(prog);
+}
+
+function renderAll(){
+  renderHead();
+  renderBody();
+  renderSummary();
+  renderMarkers();
+}
+
+/* ============================================================
+   CRUD
+   ============================================================ */
+function addPointAt(nx, ny){
+  const p = makePoint(nx, ny);
+  state.points.push(p);
+  state.selectedId = p.id;
+  renderAll();
+  selectPoint(p.id, { scroll:true });
+  save();
+}
+function deletePoint(id){
+  const p = pointById(id);
+  if(!p) return;
+  const label = p.cols.sensorId || ("sensor " + (pointIndex(p) + 1));
+  if(!confirm("Delete " + label + "?")) return;
+  state.points = state.points.filter(x => x.id !== id);
+  if(state.selectedId === id) state.selectedId = null;
+  renderAll();
+  save();
+}
+
+/* ============================================================
+   Map interactions (pan / zoom / place / drag)
+   ============================================================ */
+const pointers = new Map();
+let panStart = null, dragMarker = null, moved = false, pinch = null, pendingMarker = null;
+
+viewport.addEventListener("pointerdown", e => {
+  if(e.button === 2) return;
+  pointers.set(e.pointerId, { x:e.clientX, y:e.clientY });
+
+  if(pointers.size === 2){
+    const pts = Array.from(pointers.values());
+    pinch = {
+      dist: Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y),
+      mid: { x:(pts[0].x + pts[1].x) / 2, y:(pts[0].y + pts[1].y) / 2 }
+    };
+    panStart = null;
+    return;
+  }
+  if(pointers.size > 2) return;
+
+  const markerEl = e.target && e.target.closest ? e.target.closest(".marker") : null;
+  if(markerEl){
+    dragMarker = pointById(markerEl.dataset.id);
+    pendingMarker = dragMarker;
+    moved = false;
+    if(dragMarker){
+      state.selectedId = dragMarker.id;
+      selectPoint(dragMarker.id, { pan:false, scroll:true });
+    }
+    return;
+  }
+  panStart = { x:e.clientX, y:e.clientY, tx:state.view.tx, ty:state.view.ty };
+  moved = false;
+  cancelAnimationFrame(animRaf);
+});
+
+window.addEventListener("pointermove", e => {
+  if(pointers.has(e.pointerId)) pointers.set(e.pointerId, { x:e.clientX, y:e.clientY });
+  else if(dragMarker || panStart) { /* keep tracking even if pointer left the viewport */ }
+
+  if(pinch && pointers.size === 2){
+    const pts = Array.from(pointers.values());
+    const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+    const mid = { x:(pts[0].x + pts[1].x) / 2, y:(pts[0].y + pts[1].y) / 2 };
+    if(pinch.dist > 0){
+      const r = viewport.getBoundingClientRect();
+      zoomAt(dist / pinch.dist, mid.x - r.left, mid.y - r.top);
+    }
+    pinch.dist = dist;
+    return;
+  }
+
+  if(dragMarker){
+    const mp = screenToMap(e.clientX, e.clientY);
+    dragMarker.x = clamp(mp.x / state.map.w, 0, 1);
+    dragMarker.y = clamp(mp.y / state.map.h, 0, 1);
+    positionMarkers();
+    updateCoords(mp);
+    moved = true;
+    return;
+  }
+  if(panStart){
+    const dx = e.clientX - panStart.x, dy = e.clientY - panStart.y;
+    if(Math.abs(dx) > 3 || Math.abs(dy) > 3){ moved = true; state.userAdjusted = true; }
+    state.view.tx = panStart.tx + dx;
+    state.view.ty = panStart.ty + dy;
+    viewport.classList.add("panning");
+    applyView();
+  }
+  updateCoords(screenToMap(e.clientX, e.clientY));
+});
+
+function endPointer(e){
+  pointers.delete(e.pointerId);
+  if(pointers.size < 2) pinch = null;
+  viewport.classList.remove("panning");
+
+  if(dragMarker){
+    if(moved){ save(); }
+    else if(pendingMarker){ panToPoint(pendingMarker); }
+    dragMarker = null;
+    pendingMarker = null;
+    return;
+  }
+  if(panStart && !moved && e.type === "pointerup"){
+    if(state.placing){
+      const mp = screenToMap(e.clientX, e.clientY);
+      if(mp.x >= 0 && mp.y >= 0 && mp.x <= state.map.w && mp.y <= state.map.h){
+        if(state.locateTarget){
+          const p = pointById(state.locateTarget);
+          if(p){
+            p.x = clamp(mp.x / state.map.w, 0, 1);
+            p.y = clamp(mp.y / state.map.h, 0, 1);
+            state.locateTarget = null;
+            setPlacing(false);
+            renderAll();
+            selectPoint(p.id);
+            save();
+            toast("Sensor placed.");
+            return;
+          }
+        }
+        addPointAt(clamp(mp.x / state.map.w, 0, 1), clamp(mp.y / state.map.h, 0, 1));
+      }
+    }else{
+      state.selectedId = null;
+      renderBody();
+      positionMarkers();
+    }
+  }
+  panStart = null;
+}
+window.addEventListener("pointerup", endPointer);
+window.addEventListener("pointercancel", endPointer);
+viewport.addEventListener("contextmenu", e => e.preventDefault());
+
+viewport.addEventListener("wheel", e => {
+  if(!state.map) return;
+  e.preventDefault();
+  const r = viewport.getBoundingClientRect();
+  const delta = e.deltaMode === 1 ? e.deltaY * 18 : e.deltaY;
+  zoomAt(Math.pow(1.0015, -delta), e.clientX - r.left, e.clientY - r.top);
+}, { passive:false });
+
+function updateCoords(mp){
+  if(!state.map || !mp){ $("#coords").textContent = "–"; return; }
+  const x = Math.round(mp.x), y = Math.round(mp.y);
+  const px = (mp.x / state.map.w * 100).toFixed(1);
+  const py = (mp.y / state.map.h * 100).toFixed(1);
+  $("#coords").textContent = "x " + x + ", y " + y + "  (" + px + "%, " + py + "%)";
+}
+
+function setPlacing(on){
+  state.placing = on;
+  if(!on) state.locateTarget = null;
+  viewport.classList.toggle("placing", on);
+  $("#btnAdd").classList.toggle("active", on);
+  $("#btnAdd").textContent = on ? "Click map to place… (Esc)" : "＋ Add sensor";
+}
+
+/* ============================================================
+   Map upload (picker + drag/drop + paste)
+   ============================================================ */
+function readFileAsDataURL(file){
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(fr.result);
+    fr.onerror = () => reject(fr.error);
+    fr.readAsDataURL(file);
+  });
+}
+async function handleMapFile(file){
+  if(!file || !/^image\//.test(file.type)){ toast("Please choose an image file (PNG, JPG, WebP…)."); return; }
+  if(state.points.length && !confirm("Upload a new map?\n\nExisting sensor positions stay where they are and may not match the new map.")) return;
+  try{
+    const url = await readFileAsDataURL(file);
+    const mapObj = { name: file.name, dataUrl:url, w:0, h:0 };
+    await setMap(mapObj, url);
+    const ok = await persistMap(mapObj);
+    save();
+    toast(ok ? "Map loaded: " + file.name : "Map loaded — but it could not be stored. Use “Save project” to keep it.");
+  }catch(err){
+    toast("Could not read that image.");
+  }
+}
+$("#fileMap").addEventListener("change", e => { if(e.target.files[0]) handleMapFile(e.target.files[0]); e.target.value = ""; });
+$("#btnUpload").onclick = () => $("#fileMap").click();
+$("#btnUpload2").onclick = () => $("#fileMap").click();
+
+["dragenter","dragover"].forEach(ev => viewport.addEventListener(ev, e => {
+  e.preventDefault(); $("#dropOverlay").style.display = "grid";
+}));
+viewport.addEventListener("dragleave", e => {
+  if(e.target === viewport) $("#dropOverlay").style.display = "none";
+});
+viewport.addEventListener("drop", e => {
+  e.preventDefault();
+  $("#dropOverlay").style.display = "none";
+  const f = e.dataTransfer.files && e.dataTransfer.files[0];
+  if(f) handleMapFile(f);
+});
+window.addEventListener("paste", e => {
+  const items = e.clipboardData && e.clipboardData.items;
+  if(!items) return;
+  for(const it of items){
+    if(it.type && it.type.indexOf("image") === 0){
+      const f = it.getAsFile();
+      if(f){ handleMapFile(f); break; }
+    }
+  }
+});
+
+/* ============================================================
+   Grid overlay
+   ============================================================ */
+function drawGrid(){
+  if(gridEl){ gridEl.remove(); gridEl = null; }
+  if(!state.map || !state.gridOn) return;
+  const w = state.map.w, h = state.map.h;
+  const step = Math.max(24, Math.round(Math.min(w, h) / 12));
+  let cells = "";
+  for(let x = step; x < w; x += step){
+    const major = Math.round(x / step) % 5 === 0;
+    cells += '<line x1="' + x + '" y1="0" x2="' + x + '" y2="' + h + '" stroke="' + (major ? "rgba(255,255,255,.34)" : "rgba(255,255,255,.15)") + '" stroke-width="' + (major ? 1.6 : 1) + '"/>';
+  }
+  for(let y = step; y < h; y += step){
+    const major = Math.round(y / step) % 5 === 0;
+    cells += '<line x1="0" y1="' + y + '" x2="' + w + '" y2="' + y + '" stroke="' + (major ? "rgba(255,255,255,.34)" : "rgba(255,255,255,.15)") + '" stroke-width="' + (major ? 1.6 : 1) + '"/>';
+  }
+  let labels = "";
+  for(let x = step; x < w; x += step){
+    if(Math.round(x / step) % 2 === 0) labels += '<text x="' + (x + 4) + '" y="16" fill="rgba(255,255,255,.8)" font-size="12" font-family="monospace">' + x + '</text>';
+  }
+  for(let y = step; y < h; y += step){
+    if(Math.round(y / step) % 2 === 0) labels += '<text x="4" y="' + (y - 4) + '" fill="rgba(255,255,255,.8)" font-size="12" font-family="monospace">' + y + '</text>';
+  }
+  gridEl = document.createElement("div");
+  gridEl.id = "gridSvg";
+  gridEl.style.cssText = "position:absolute;left:0;top:0;pointer-events:none;transform-origin:0 0";
+  gridEl.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h + '">' + cells + labels + '</svg>';
+  viewport.insertBefore(gridEl, markerLayer);
+  applyView();
+}
+function toggleGrid(){
+  state.gridOn = !state.gridOn;
+  $("#btnGrid").classList.toggle("active", state.gridOn);
+  $("#btnGrid2").classList.toggle("active", state.gridOn);
+  drawGrid();
+  save();
+}
+
+/* ============================================================
+   Columns manager
+   ============================================================ */
+function openModal(title, bodyHTML, footButtons){
+  $("#modalTitle").textContent = title;
+  $("#modalBody").innerHTML = bodyHTML;
+  $("#modalFoot").innerHTML = "";
+  (footButtons || []).forEach(b => {
+    const btn = document.createElement("button");
+    btn.textContent = b.label;
+    if(b.primary) btn.className = "primary";
+    if(b.danger) btn.className = "danger";
+    btn.onclick = b.onClick;
+    $("#modalFoot").appendChild(btn);
+  });
+  $("#modalBack").classList.add("show");
+}
+function closeModal(){ $("#modalBack").classList.remove("show"); }
+$("#modalBack").addEventListener("click", e => { if(e.target === $("#modalBack")) closeModal(); });
+
+function openColumnsModal(){
+  const rows = state.columns.map(c => {
+    const opts = c.type === "select"
+      ? '<input class="opt" type="text" data-opt="' + esc(c.key) + '" value="' + esc((c.options || []).join(", ")) + '" placeholder="Option A, Option B" />'
+      : '<span style="flex:1.3"></span>';
+    return '<div class="colrow">' +
+      '<input class="toggle" type="checkbox" data-vis="' + esc(c.key) + '" ' + (c.visible ? "checked" : "") + ' title="Show column" />' +
+      '<input class="name" type="text" data-name="' + esc(c.key) + '" value="' + esc(c.label) + '" />' +
+      '<select class="type" data-type="' + esc(c.key) + '" ' + (c.locked ? "disabled" : "") + '>' +
+        ["text","number","date","select"].map(t => '<option value="' + t + '"' + (t === c.type ? " selected" : "") + '>' + t + '</option>').join("") +
+      '</select>' + opts +
+      (c.locked ? '<span title="Built-in column">🔒</span>'
+                : '<button class="danger" data-del="' + esc(c.key) + '" title="Remove column">✕</button>') +
+      '</div>';
+  }).join("");
+
+  const body =
+    '<p class="hint">The built-in columns suit a soil-sensor battery check. Rename them, hide them, or add your own (e.g. “Moisture %”, “Soil temp”, “Firmware”).</p>' +
+    '<div id="colList">' + rows + '</div>' +
+    '<div style="margin-top:12px"><button id="addCol">＋ Add custom column</button></div>';
+
+  openModal("Table columns", body, [
+    { label:"Cancel", onClick: closeModal },
+    { label:"Save", primary:true, onClick: () => {
+      document.querySelectorAll("#colList .colrow").forEach(row => {
+        const key = row.querySelector("[data-name]").dataset.name;
+        const c = state.columns.find(x => x.key === key);
+        if(!c) return;
+        c.label = row.querySelector("[data-name]").value || c.label;
+        c.visible = row.querySelector("[data-vis]").checked;
+        const tsel = row.querySelector("[data-type]");
+        if(tsel && !tsel.disabled){
+          const nt = tsel.value;
+          if(nt !== c.type){
+            c.type = nt;
+            if(nt === "select" && !c.options) c.options = ["Option A", "Option B"];
+            state.points.forEach(p => { if(p.cols[c.key] === undefined) p.cols[c.key] = ""; });
+          }
+        }
+        const oin = row.querySelector("[data-opt]");
+        if(oin && c.type === "select"){
+          c.options = oin.value.split(",").map(s => s.trim()).filter(Boolean);
+        }
+      });
+      closeModal();
+      renderAll();
+      save();
+      toast("Columns updated.");
+    }}
+  ]);
+
+  document.getElementById("addCol").onclick = () => {
+    const key = uidKey();
+    state.columns.push({ key, label:"New column", type:"text", width:140, visible:true, locked:false });
+    closeModal();
+    openColumnsModal();
+    setTimeout(() => {
+      const inp = document.querySelector('[data-name="' + key + '"]');
+      if(inp){ inp.focus(); inp.select(); }
+    }, 30);
+  };
+  document.querySelectorAll("[data-del]").forEach(b => {
+    b.onclick = () => {
+      const key = b.dataset.del;
+      state.columns = state.columns.filter(c => c.key !== key);
+      state.points.forEach(p => { delete p.cols[key]; });
+      closeModal();
+      openColumnsModal();
+    };
+  });
+  document.querySelectorAll("[data-vis]").forEach(cb => {
+    cb.onchange = () => {
+      const c = state.columns.find(x => x.key === cb.dataset.vis);
+      if(c) c.visible = cb.checked;
+      renderAll();
+    };
+  });
+}
+
+/* ============================================================
+   Import / Export
+   ============================================================ */
+function csvEscape(v){
+  const s = String(v == null ? "" : v);
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+function downloadBlob(blob, name){
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+function exportCsv(){
+  if(!state.points.length){ toast("Nothing to export yet."); return; }
+  const cols = visibleColumns();
+  const head = ["#", "Map X (%)", "Map Y (%)"].concat(cols.map(c => c.label));
+  const lines = [head.map(csvEscape).join(",")];
+  filteredPoints().forEach(p => {
+    const row = [
+      pointIndex(p) + 1,
+      p.x === null ? "" : (p.x * 100).toFixed(2),
+      p.y === null ? "" : (p.y * 100).toFixed(2)
+    ].concat(cols.map(c => {
+      const v = p.cols[c.key];
+      return v === undefined || v === null ? "" : v;
+    }));
+    lines.push(row.map(csvEscape).join(","));
+  });
+  const blob = new Blob(["\ufeff" + lines.join("\r\n")], { type:"text/csv;charset=utf-8" });
+  downloadBlob(blob, "soil-sensors-" + today() + ".csv");
+}
+function exportProject(){
+  const data = {
+    app:"soil-sensor-tracker",
+    version:1,
+    exportedAt:new Date().toISOString(),
+    map: state.map ? { name:state.map.name, dataUrl:state.map.dataUrl, w:state.map.w, h:state.map.h } : null,
+    points: state.points,
+    columns: state.columns
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type:"application/json" });
+  downloadBlob(blob, "soil-sensor-project-" + today() + ".json");
+  toast("Project saved (map + every sensor).");
+}
+function exportHtml(){
+  const data = {
+    points: state.points,
+    columns: state.columns,
+    map: state.map ? { name:state.map.name, dataUrl:state.map.dataUrl, w:state.map.w, h:state.map.h } : null
+  };
+  const clone = document.documentElement.cloneNode(true);
+  ["#markerLayer","#tbody","#theadRow","#summary"].forEach(sel => {
+    const n = clone.querySelector(sel); if(n) n.innerHTML = "";
+  });
+  const img = clone.querySelector("#mapImage");
+  if(img){ img.removeAttribute("src"); img.removeAttribute("style"); }
+  const empty = clone.querySelector("#emptyMap");
+  if(empty) empty.removeAttribute("style");
+  const scripts = Array.from(clone.querySelectorAll("script"));
+  const app = scripts.find(s => s.textContent.indexOf("__SOIL_APP_DATA__") !== -1);
+  const payload = JSON.stringify(data).replace(/</g, "\\u003c");
+  const pre = document.createElement("script");
+  pre.textContent = "window.__SOIL_APP_DATA__ = " + payload + ";";
+  if(app) app.parentNode.insertBefore(pre, app);
+  else clone.querySelector("head").appendChild(pre);
+  const html = "<!DOCTYPE html>\n" + clone.outerHTML;
+  downloadBlob(new Blob([html], { type:"text/html" }), "soil-sensor-tracker-" + today() + ".html");
+  toast("Single-file HTML exported — open it anywhere, no internet needed.");
+}
+async function importProject(file){
+  try{
+    const text = await file.text();
+    const data = JSON.parse(text);
+    if(!data || !Array.isArray(data.points)) throw new Error("bad file");
+    state.points = data.points || [];
+    state.columns = adoptColumns(data.columns);
+    state.selectedId = null;
+    state.points.forEach(p => { if(!p.cols) p.cols = {}; p.id = p.id || nextId(); });
+    if(data.map && data.map.dataUrl){
+      await setMap({ name:data.map.name, dataUrl:data.map.dataUrl, w:data.map.w, h:data.map.h }, data.map.dataUrl);
+      await persistMap(data.map);
+    }
+    renderAll();
+    save();
+    toast("Project loaded: " + state.points.length + " sensors.");
+  }catch(e){
+    toast("That file could not be read as a project.");
+  }
+}
+$("#fileProject").addEventListener("change", e => {
+  const f = e.target.files[0];
+  if(f) importProject(f);
+  e.target.value = "";
+});
+$("#btnImport").onclick = () => $("#fileProject").click();
+$("#btnCsv").onclick = exportCsv;
+$("#btnProject").onclick = exportProject;
+$("#btnHtml").onclick = exportHtml;
+
+/* ============================================================
+   Help
+   ============================================================ */
+function openHelp(){
+  openModal("How to use", `
+    <p class="hint">A field checklist for soil sensors: pin each sensor on the plot map, record its condition, and find it again in one click.</p>
+    <dl class="helpgrid">
+      <dt><kbd>Upload map</kbd></dt><dd>Load a plot map, drone photo or sketch. You can also drop an image straight onto the map, or paste one with <kbd>Ctrl</kbd>+<kbd>V</kbd>.</dd>
+      <dt><kbd>＋ Add sensor</kbd></dt><dd>Then click the map where that sensor sits. <kbd>Esc</kbd> stops placing. Drag any marker to nudge it into position.</dd>
+      <dt>Row ⇄ marker</dt><dd>Click a table row to highlight and centre its marker on the map. Click a marker to highlight and scroll to its row.</dd>
+      <dt>Map navigation</dt><dd>Scroll to zoom at the cursor, drag to pan, two-finger pinch on touch screens. <kbd>Fit</kbd> resets the view.</dd>
+      <dt><kbd>Grid</kbd></dt><dd>Overlays a coordinate grid so you can read off a position for a sensor.</dd>
+      <dt><kbd>Columns</kbd></dt><dd>Rename, hide or add columns (moisture, temperature, firmware…).</dd>
+      <dt>Backup</dt><dd>“Save project” writes one JSON file with the map and every sensor — keep it on a memory stick. “Export CSV” opens in Excel. “Export HTML” gives one portable file you can email.</dd>
+      <dt>Auto-save</dt><dd>Everything is stored in this browser automatically. Use a project file to move between machines.</dd>
+    </dl>`, [{ label:"Close", primary:true, onClick: closeModal }]);
+}
+$("#btnHelp").onclick = openHelp;
+
+/* ============================================================
+   Toolbar wiring
+   ============================================================ */
+$("#btnAdd").onclick = () => setPlacing(!state.placing);
+$("#btnFit").onclick = fitView;
+$("#btnGrid").onclick = toggleGrid;
+$("#btnGrid2").onclick = toggleGrid;
+$("#btnCols").onclick = openColumnsModal;
+$("#btnZoomIn").onclick = () => zoomAt(1.25);
+$("#btnZoomOut").onclick = () => zoomAt(1 / 1.25);
+$("#btnPrint").onclick = () => window.print();
+$("#btnSortDefault").onclick = () => { state.sort = { key:null, dir:1 }; renderAll(); };
+$("#search").addEventListener("input", e => { state.filter.text = e.target.value; renderBody(); renderSummary(); });
+
+function step(delta){
+  const list = filteredPoints();
+  if(!list.length) return;
+  let i = list.findIndex(p => p.id === state.selectedId);
+  i = i < 0 ? (delta > 0 ? 0 : list.length - 1) : (i + delta + list.length) % list.length;
+  selectPoint(list[i].id);
+}
+$("#btnNext").onclick = () => step(1);
+$("#btnPrev").onclick = () => step(-1);
+
+window.addEventListener("keydown", e => {
+  const tag = (e.target.tagName || "").toLowerCase();
+  const typing = tag === "input" || tag === "textarea" || tag === "select" || e.target.isContentEditable;
+  if(e.key === "Escape"){
+    if($("#modalBack").classList.contains("show")) closeModal();
+    else if(state.placing) setPlacing(false);
+    else { state.selectedId = null; renderBody(); positionMarkers(); }
+    return;
+  }
+  if(typing || e.ctrlKey || e.metaKey || e.altKey) return;
+  if(e.key === "a" || e.key === "A"){ setPlacing(!state.placing); }
+  else if(e.key === "f" || e.key === "F"){ fitView(); }
+  else if(e.key === "g" || e.key === "G"){ toggleGrid(); }
+  else if(e.key === "ArrowRight" || e.key === "n"){ step(1); }
+  else if(e.key === "ArrowLeft" || e.key === "p"){ step(-1); }
+  else if(e.key === "Delete" || e.key === "Backspace"){
+    if(state.selectedId && confirm("Delete the selected sensor?")) deletePoint(state.selectedId);
+  }
+});
+
+let resizeTimer = null;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => { if(state.map && !state.userAdjusted) fitView(); }, 120);
+});
+
+/* Draggable splitter between map and table */
+(function(){
+  const splitter = $("#splitter");
+  const main = document.querySelector("main");
+  let dragging = false;
+  const MIN = 300;
+  function onMove(e){
+    if(!dragging) return;
+    const r = main.getBoundingClientRect();
+    const w = clamp(r.right - e.clientX, MIN, Math.max(MIN, r.width - MIN));
+    main.style.setProperty("--table-w", w + "px");
+    if(state.map && !state.userAdjusted) fitView();
+  }
+  function onUp(){
+    if(!dragging) return;
+    dragging = false;
+    splitter.classList.remove("dragging");
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+  }
+  splitter.addEventListener("pointerdown", e => {
+    dragging = true;
+    splitter.classList.add("dragging");
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    splitter.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+  splitter.addEventListener("pointermove", onMove);
+  splitter.addEventListener("pointerup", onUp);
+  splitter.addEventListener("pointercancel", onUp);
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp);
+})();
+
+/* ============================================================
+   Tooltip
+   ============================================================ */
+markerLayer.addEventListener("mouseover", e => {
+  const m = e.target.closest ? e.target.closest(".marker") : null;
+  if(!m) return;
+  const p = pointById(m.dataset.id);
+  if(!p) return;
+  const st = statusOf(p.cols.condition);
+  const batt = p.cols.batteryPct;
+  tooltip.innerHTML =
+    "<b>" + esc(p.cols.sensorId || ("Sensor " + (pointIndex(p) + 1))) + "</b>" +
+    '<div class="row"><span>Location</span><span>' + esc(p.cols.location || "—") + "</span></div>" +
+    '<div class="row"><span>Condition</span><span style="color:' + STATUS[st].color + '">' + esc(p.cols.condition || "Not Checked") + "</span></div>" +
+    '<div class="row"><span>Battery</span><span>' + (batt === "" || batt === undefined || batt === null ? "—" : esc(batt) + "%") + (p.cols.batteryType ? " · " + esc(p.cols.batteryType) : "") + "</span></div>" +
+    '<div class="row"><span>Last inspected</span><span>' + esc(p.cols.lastInspected || "—") + "</span></div>";
+  tooltip.style.display = "block";
+});
+markerLayer.addEventListener("mousemove", e => {
+  if(tooltip.style.display === "none") return;
+  const w = tooltip.offsetWidth, h = tooltip.offsetHeight;
+  let x = e.clientX + 14, y = e.clientY + 14;
+  if(x + w > innerWidth - 8) x = e.clientX - w - 10;
+  if(y + h > innerHeight - 8) y = e.clientY - h - 10;
+  tooltip.style.left = x + "px";
+  tooltip.style.top = y + "px";
+});
+markerLayer.addEventListener("mouseout", e => {
+  const from = e.target.closest ? e.target.closest(".marker") : null;
+  const to = e.relatedTarget && e.relatedTarget.closest ? e.relatedTarget.closest(".marker") : null;
+  if(from && from !== to) tooltip.style.display = "none";
+});
+
+/* ============================================================
+   Boot
+   ============================================================ */
+async function boot(){
+  const embedded = window.__SOIL_APP_DATA__;
+  if(embedded){
+    state.points = embedded.points || [];
+    state.columns = adoptColumns(embedded.columns);
+    state.points.forEach(p => { if(!p.cols) p.cols = {}; p.id = p.id || nextId(); });
+    if(embedded.map && embedded.map.dataUrl){
+      await setMap({ name:embedded.map.name, dataUrl:embedded.map.dataUrl, w:embedded.map.w, h:embedded.map.h }, embedded.map.dataUrl);
+    }
+    $("#banner").classList.add("show");
+    $("#bannerMsg").textContent = "Opened from a shared file. Edits are saved in this browser — use “Save project” or “Export HTML” to share again.";
+    renderAll();
+    setSaveState("saved");
+    return;
+  }
+
+  const local = loadLocal();
+  if(local){
+    state.points = local.points || [];
+    state.columns = adoptColumns(local.columns);
+    state.gridOn = !!local.gridOn;
+    state.points.forEach(p => { if(!p.cols) p.cols = {}; });
+  }
+  $("#btnGrid").classList.toggle("active", state.gridOn);
+  $("#btnGrid2").classList.toggle("active", state.gridOn);
+
+  const storedMap = await readPersistedMap();
+  if(storedMap && storedMap.dataUrl){
+    try{ await setMap(storedMap, storedMap.dataUrl); }catch(e){}
+  }
+  if(!state.map && local && local.mapMeta){
+    $("#mapName").textContent = local.mapMeta.name + " (re-upload to display)";
+  }
+  renderAll();
+  setSaveState(local ? "saved" : "");
+}
+
+window.addEventListener("beforeunload", () => { clearTimeout(saveTimer); doSave(); });
+boot();
+
+})();
+</script>
+</body>
+</html>
