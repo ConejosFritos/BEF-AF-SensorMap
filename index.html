@@ -19,6 +19,8 @@
     --needs:#d29922;
     --faulty:#f85149;
     --unknown:#6e7681;
+    --wet:#4dfff0;
+    --removed:#c5111188;
     --radius:10px;
     --shadow:0 8px 24px rgba(0,0,0,.45);
   }
@@ -263,6 +265,8 @@
   .cond.c-needs{color:#e3b341;background:rgba(210,153,34,.16);border-color:rgba(210,153,34,.4)}
   .cond.c-faulty{color:#ff7b72;background:rgba(248,81,73,.16);border-color:rgba(248,81,73,.4)}
   .cond.c-unknown{color:#9aa5b1;background:rgba(110,118,129,.18);border-color:rgba(110,118,129,.45)}
+  .cond.c-wet{color:#9ffcf5;background:rgba(77,255,240,.14);border-color:rgba(77,255,240,.4)}
+  .cond.c-removed{color:#ff8a84;background:rgba(197,17,17,.18);border-color:rgba(197,17,17,.45)}
   .cond.c-other{color:#79c0ff;background:rgba(56,139,253,.16);border-color:rgba(56,139,253,.4)}
   .cond select.cond-select{
     background:transparent;border:none;color:inherit;font-weight:600;font-size:12px;
@@ -379,6 +383,8 @@
           <div><i style="background:var(--needs)"></i>Needs battery</div>
           <div><i style="background:var(--faulty)"></i>Faulty</div>
           <div><i style="background:var(--unknown)"></i>Not checked</div>
+          <div><i style="background:var(--wet)"></i>Wet</div>
+          <div><i style="background:var(--removed)"></i>Removed</div>
         </div>
       </div>
       <div class="hud" id="hudBR">
@@ -429,7 +435,7 @@ const MAP_KEY = "soilSensorTracker.map";
 const IDB_NAME = "soil-sensor-tracker";
 const IDB_STORE = "files";
 
-const CONDITIONS = ["Good", "Needs Battery", "Faulty", "Not Checked"];
+const CONDITIONS = ["Good", "Needs Battery", "Faulty", "Not Checked", "Wet", "Removed"];
 const BATTERY_TYPES = ["AA", "AAA", "CR2032", "CR123A", "CR2450", "D cell", "Li-SOCl2 3.6V", "Solar", "Other"];
 
 const DEFAULT_COLUMNS = [
@@ -447,6 +453,8 @@ const STATUS = {
   needs:   { label:"Needs Battery", color:"#d29922" },
   faulty:  { label:"Faulty",        color:"#f85149" },
   unknown: { label:"Not Checked",   color:"#6e7681" },
+  wet:     { label:"Wet",          color:"#4dfff0" },
+  removed: { label:"Removed",      color:"#c51111" },
   other:   { label:"Other",         color:"#388bfd" }
 };
 const LOW_BATTERY = 20;
@@ -481,6 +489,11 @@ function cloneColumns(cols){
 const REMOVED_COLUMN_KEYS = ["depth"];
 function adoptColumns(cols){
   const list = cols && cols.length ? cloneColumns(cols) : cloneColumns(DEFAULT_COLUMNS);
+  const cond = list.find(c => c.key === "condition");
+  if(cond){
+    cond.options = (cond.options || []).slice();
+    CONDITIONS.forEach(o => { if(!cond.options.includes(o)) cond.options.push(o); });
+  }
   return list.filter(c => !REMOVED_COLUMN_KEYS.includes(c.key));
 }
 let uid = 1;
@@ -520,6 +533,8 @@ function today(){ return fmtDate(new Date()); }
 function statusOf(condition){
   const c = String(condition || "").toLowerCase();
   if(!c || c.includes("not") || c.includes("unchecked") || c.includes("unknown")) return "unknown";
+  if(c.includes("remov")) return "removed";
+  if(c.includes("wet")) return "wet";
   if(c.includes("fault") || c.includes("bad") || c.includes("fail")) return "faulty";
   if(c.includes("batt") || c.includes("charge") || c.includes("due")) return "needs";
   if(c.includes("good") || c === "ok" || c.includes("fine")) return "good";
@@ -1027,7 +1042,7 @@ function renderBody(){
 }
 
 function renderSummary(){
-  const counts = { good:0, needs:0, faulty:0, unknown:0, other:0 };
+  const counts = { good:0, needs:0, faulty:0, unknown:0,wet:0,removed:0, other:0 };
   let low = 0, inspected = 0;
   state.points.forEach(p => {
     const s = statusOf(p.cols.condition);
@@ -1044,8 +1059,11 @@ function renderSummary(){
     { key:"needs",   label:"Needs battery",      color:STATUS.needs.color, n:counts.needs },
     { key:"faulty",  label:"Faulty",             color:STATUS.faulty.color, n:counts.faulty },
     { key:"unknown", label:"Not checked",        color:STATUS.unknown.color, n:counts.unknown },
-    { key:"low",     label:"Battery ≤ " + LOW_BATTERY + "%", color:STATUS.faulty.color, n:low }
+    { key:"low",     label:"Battery ≤ " + LOW_BATTERY + "%", color:STATUS.faulty.color, n:low },
+    { key:"wet",  label:"Wet",             color:STATUS.wet.color, n:counts.wet },
+    { key:"removed", label:"Removed",        color:STATUS.removed.color, n:counts.removed },
   ];
+  
   defs.forEach(d => {
     const chip = document.createElement("div");
     chip.className = "chip" + (state.filter.condition === d.key ? " on" : "");
