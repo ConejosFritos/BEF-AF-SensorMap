@@ -876,7 +876,11 @@ function makeEditor(p, c, extraClass){
   }else{
     el = document.createElement("input");
     el.type = c.type === "number" ? "number" : c.type === "date" ? "date" : "text";
-    if(c.type === "number"){ el.step = "any"; el.inputMode = "decimal"; }
+    if(c.type === "number"){
+      const isVoltage = /volt/i.test(c.key) || /volt/i.test(c.label);
+      el.step = c.step != null ? c.step : (isVoltage ? "0.01" : "any");
+      el.inputMode = "decimal";
+    }
     el.value = val;
     el.oninput = () => { p.cols[c.key] = el.value; onCellChanged(p, c); };
     el.onblur = () => {
