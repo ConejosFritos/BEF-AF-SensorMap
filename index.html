@@ -442,8 +442,8 @@ const CONDITIONS = ["Good", "Needs Battery", "Faulty", "Not Checked", "Wet", "Re
 const BATTERY_TYPES = ["AA", "AAA", "CR2032", "CR123A", "CR2450", "D cell", "Li-SOCl2 3.6V", "Solar", "Other"];
 
 const DEFAULT_COLUMNS = [
-  { key:"sensorId",    label:"Sensor ID",       type:"text",   width:120, visible:true, locked:true },
-  { key:"location",    label:"Location / Zone", type:"text",   width:170, visible:true, locked:true },
+  { key:"sensorId",    label:"Sensor ID",       type:"text",   width:60,  visible:true, locked:true },
+  { key:"location",    label:"Location / Zone", type:"text",   width:85,  visible:true, locked:true },
   { key:"batteryType", label:"Battery",         type:"select", width:130, visible:true, locked:true, options:BATTERY_TYPES.slice() },
   { key:"batteryPct",  label:"Battery %",       type:"number", width:110, visible:true, locked:true, numeric:true },
   { key:"condition",   label:"Condition",       type:"select", width:140, visible:true, locked:true, options:CONDITIONS.slice() },
@@ -493,6 +493,10 @@ function cloneColumns(cols){
 const REMOVED_COLUMN_KEYS = ["depth"];
 function adoptColumns(cols){
   const list = cols && cols.length ? cloneColumns(cols) : cloneColumns(DEFAULT_COLUMNS);
+  list.forEach(c => {
+    if(c.key === "sensorId") c.width = 60;
+    else if(c.key === "location") c.width = 85;
+  });
   const cond = list.find(c => c.key === "condition");
   if(cond){
     cond.options = (cond.options || []).slice();
