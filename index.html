@@ -263,6 +263,16 @@
   .batt{display:flex;align-items:center;gap:6px;justify-content:flex-end}
   .batt .bar{width:44px;height:6px;border-radius:4px;background:#232c38;overflow:hidden;flex:none}
   .batt .bar i{display:block;height:100%;background:var(--good);transition:width .15s}
+  .photos{display:flex;flex-wrap:wrap;align-items:center;gap:4px}
+  .photo-thumb{position:relative;width:28px;height:28px;flex:none;display:block}
+  .photo-thumb img{width:100%;height:100%;object-fit:cover;border-radius:5px;border:1px solid var(--border);cursor:zoom-in;display:block}
+  .photo-del{
+    position:absolute;top:-5px;right:-5px;width:15px;height:15px;padding:0;
+    display:grid;place-items:center;border-radius:50%;font-size:9px;line-height:1;
+    background:var(--faulty);border-color:var(--faulty);color:#08131d;
+  }
+  .photo-del:hover{background:#ff7b72;border-color:#ff7b72}
+  .photo-add{padding:3px 7px;font-size:12px;line-height:1.2;flex:none}
   .cond{display:inline-flex;align-items:center;padding:2px 4px;border-radius:999px;border:1px solid transparent}
   .cond.c-good{color:#6fd47f;background:rgba(46,160,67,.16);border-color:rgba(46,160,67,.4)}
   .cond.c-needs{color:#e3b341;background:rgba(210,153,34,.16);border-color:rgba(210,153,34,.4)}
@@ -345,6 +355,7 @@
     </div>
     <input type="file" id="fileMap" accept="image/*" hidden />
     <input type="file" id="fileProject" accept="application/json,.json" hidden />
+    <input type="file" id="filePhotos" accept="image/*" multiple hidden />
   </header>
 
   <div id="banner">
@@ -448,8 +459,10 @@ const DEFAULT_COLUMNS = [
   { key:"batteryPct",  label:"Battery %",       type:"number", width:110, visible:true, locked:true, numeric:true },
   { key:"condition",   label:"Condition",       type:"select", width:140, visible:true, locked:true, options:CONDITIONS.slice() },
   { key:"lastInspected",label:"Last inspected", type:"date",   width:140, visible:true, locked:true },
-  { key:"notes",       label:"Notes",           type:"text",   width:220, visible:true, locked:true }
+  { key:"notes",       label:"Notes",           type:"text",   width:220, visible:true, locked:true },
+  { key:"photos",      label:"Photos",          type:"photos", width:170, visible:false, locked:true }
 ];
+const PHOTOS_COLUMN = DEFAULT_COLUMNS[DEFAULT_COLUMNS.length - 1];
 
 const STATUS = {
   good:    { label:"Good",          color:"#2ea043" },
@@ -497,6 +510,7 @@ function adoptColumns(cols){
     if(c.key === "sensorId") c.width = 60;
     else if(c.key === "location") c.width = 85;
   });
+  if(!list.some(isPhotoColumn)) list.push(cloneColumns([PHOTOS_COLUMN])[0]);
   const cond = list.find(c => c.key === "condition");
   if(cond){
     cond.options = (cond.options || []).slice();
@@ -570,6 +584,29 @@ function percentToVoltage(pct){
   const v = k.minVolt + (clamp(n, 0, 100) - k.minPct) * (k.maxVolt - k.minVolt) / (k.maxPct - k.minPct);
   return Math.round(v * 100) / 100;
 }
+function isPhotoColumn(c){
+  if(!c) return false;
+  if(c.type === "photos") return true;
+  const label = String(c.label || "").trim();
+  return /^photos?$/i.test(label) || /photo/i.test(String(c.key || ""));
+}
+function photoList(v){
+  if(Array.isArray(v)) return v.filter(x => typeof x === "string" && x);
+  if(typeof v === "string" && v.trim()){
+    const s = v.trim();
+    try{
+      const arr = JSON.parse(s);
+      if(Array.isArray(arr)) return arr.filter(x => typeof x === "string" && x);
+    }catch(e){}
+    return s.split(/\r?\n|,/).map(x => x.trim()).filter(Boolean);
+  }
+  return [];
+}
+function normalizePointPhotos(p){
+  state.columns.forEach(c => {
+    if(isPhotoColumn(c)) p.cols[c.key] = photoList(p.cols[c.key]);
+  });
+}
 
 /* ============================================================
    Storage: localStorage (data) + IndexedDB (map image)
@@ -611,6 +648,18 @@ async function idbGet(key){
       r.onsuccess = () => resolve(r.result || null);
       r.onerror = () => resolve(null);
     }catch(e){ resolve(null); }
+  });
+}
+async function idbDelete(key){
+  const db = await openIdb();
+  if(!db) return false;
+  return new Promise(resolve => {
+    try{
+      const tx = db.transaction(IDB_STORE, "readwrite");
+      tx.objectStore(IDB_STORE).delete(key);
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => resolve(false);
+    }catch(e){ resolve(false); }
   });
 }
 async function persistMap(map){
@@ -725,6 +774,7 @@ function makePoint(nx, ny){
   state.columns.forEach(c => {
     if(c.key === "condition") p.cols.condition = "Not Checked";
     else if(c.key === "batteryType") p.cols.batteryType = BATTERY_TYPES[0];
+    else if(isPhotoColumn(c)) p.cols[c.key] = [];
     else p.cols[c.key] = "";
   });
   return p;
@@ -974,7 +1024,8 @@ function filteredPoints(){
     list = list.filter(p => {
       for(const c of cols){
         const v = p.cols[c.key];
-        if(v !== undefined && v !== null && String(v).toLowerCase().includes(q)) return true;
+        const text = isPhotoColumn(c) ? photoList(v).join(" ") : v;
+        if(text !== undefined && text !== null && String(text).toLowerCase().includes(q)) return true;
       }
       return false;
     });
@@ -1032,7 +1083,9 @@ function renderBody(){
     cols.forEach(c => {
       const td = document.createElement("td");
       if(c.numeric) td.classList.add("num");
-      if(c.key === "condition"){
+      if(isPhotoColumn(c)){
+        td.appendChild(makePhotosEditor(p, c));
+      }else if(c.key === "condition"){
         const wrap = document.createElement("div");
         wrap.className = "cond c-" + statusOf(p.cols.condition);
         wrap.appendChild(makeEditor(p, c, "cond-select"));
@@ -1084,6 +1137,142 @@ function renderBody(){
     ? (list.length === state.points.length ? state.points.length + " sensors" : list.length + " of " + state.points.length + " shown")
     : "";
 }
+
+let pendingPhoto = null;
+let assetsDirHandle = null;
+
+function uniquePhotoName(name){
+  const ext = (String(name).match(/\.[a-z0-9]+$/i) || [""])[0].toLowerCase();
+  const base = String(name).replace(/\.[^.]*$/, "").replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "photo";
+  return base + "-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 6) + ext;
+}
+
+async function getAssetsDir(){
+  if(assetsDirHandle) return assetsDirHandle;
+  const stored = await idbGet("assetsDir");
+  if(stored){
+    assetsDirHandle = stored;
+    try{
+      if(await stored.queryPermission({ mode:"readwrite" }) === "granted") return stored;
+      if(await stored.requestPermission({ mode:"readwrite" }) === "granted") return stored;
+    }catch(e){}
+    assetsDirHandle = null;
+  }
+  if(typeof window.showDirectoryPicker !== "function") return null;
+  const root = await window.showDirectoryPicker({ id:"soil-sensor-assets", mode:"readwrite" });
+  const assets = await root.getDirectoryHandle("assets", { create:true });
+  assetsDirHandle = assets;
+  await idbSet("assetsDir", assets);
+  return assets;
+}
+
+function addPhotos(p, c){
+  pendingPhoto = { p, c };
+  const input = $("#filePhotos");
+  input.value = "";
+  input.click();
+}
+
+async function handlePhotoFiles(files){
+  const target = pendingPhoto;
+  pendingPhoto = null;
+  if(!target || !files.length) return;
+  const { p, c } = target;
+  let dir = null;
+  if(typeof window.showDirectoryPicker === "function"){
+    try{
+      dir = await getAssetsDir();
+    }catch(e){
+      dir = null;
+    }
+  }
+  const paths = photoList(p.cols[c.key]).slice();
+  let added = 0;
+  for(const file of files){
+    if(!/^image\//.test(file.type)) continue;
+    const name = uniquePhotoName(file.name);
+    const path = "assets/" + name;
+    if(dir){
+      try{
+        const fh = await dir.getFileHandle(name, { create:true });
+        const w = await fh.createWritable();
+        await w.write(file);
+        await w.close();
+      }catch(e){
+        toast("Could not save " + file.name + " to the assets folder.");
+        continue;
+      }
+    }
+    try{
+      const dataUrl = await readFileAsDataURL(file);
+      await idbSet("photo:" + path, dataUrl);
+    }catch(e){}
+    paths.push(path);
+    added++;
+  }
+  p.cols[c.key] = paths;
+  save();
+  renderBody();
+  if(added){
+    toast(added + (added === 1 ? " photo added." : " photos added.") + (dir ? "" : " Saved in this browser only — no assets folder selected."));
+  }
+}
+
+function openPhotoPreview(path, src){
+  openModal("Photo", '<div style="text-align:center"><img src="' + esc(src) + '" alt="" style="max-width:100%;max-height:70vh;border-radius:8px;border:1px solid var(--border)" /><p class="hint" style="margin-bottom:0;word-break:break-all">' + esc(path) + "</p></div>", [
+    { label:"Close", primary:true, onClick:closeModal }
+  ]);
+}
+
+function makePhotosEditor(p, c){
+  const wrap = document.createElement("div");
+  wrap.className = "photos";
+  const paths = photoList(p.cols[c.key]);
+  paths.forEach(path => {
+    const item = document.createElement("span");
+    item.className = "photo-thumb";
+    const img = document.createElement("img");
+    img.src = path;
+    img.alt = "";
+    img.loading = "lazy";
+    img.title = path;
+    img.onerror = async () => {
+      if(img.dataset.fallback) return;
+      img.dataset.fallback = "1";
+      const dataUrl = await idbGet("photo:" + path);
+      if(dataUrl) img.src = dataUrl;
+    };
+    img.onclick = ev => { ev.stopPropagation(); openPhotoPreview(path, img.src); };
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "photo-del";
+    del.textContent = "✕";
+    del.title = "Remove photo";
+    del.onclick = async ev => {
+      ev.stopPropagation();
+      p.cols[c.key] = photoList(p.cols[c.key]).filter(x => x !== path);
+      await idbDelete("photo:" + path);
+      save();
+      renderBody();
+    };
+    item.append(img, del);
+    wrap.appendChild(item);
+  });
+  const add = document.createElement("button");
+  add.type = "button";
+  add.className = "photo-add";
+  add.textContent = "＋";
+  add.title = "Add photos";
+  add.onclick = ev => { ev.stopPropagation(); addPhotos(p, c); };
+  wrap.appendChild(add);
+  return wrap;
+}
+
+$("#filePhotos").addEventListener("change", e => {
+  const files = Array.from(e.target.files || []);
+  e.target.value = "";
+  handlePhotoFiles(files);
+});
 
 function renderSummary(){
   const counts = { good:0, needs:0, faulty:0, unknown:0,wet:0,removed:0, other:0 };
@@ -1414,7 +1603,7 @@ function openColumnsModal(){
       '<input class="toggle" type="checkbox" data-vis="' + esc(c.key) + '" ' + (c.visible ? "checked" : "") + ' title="Show column" />' +
       '<input class="name" type="text" data-name="' + esc(c.key) + '" value="' + esc(c.label) + '" />' +
       '<select class="type" data-type="' + esc(c.key) + '" ' + (c.locked ? "disabled" : "") + '>' +
-        ["text","number","date","select"].map(t => '<option value="' + t + '"' + (t === c.type ? " selected" : "") + '>' + t + '</option>').join("") +
+        ["text","number","date","select","photos"].map(t => '<option value="' + t + '"' + (t === c.type ? " selected" : "") + '>' + t + '</option>').join("") +
       '</select>' + opts +
       (c.locked ? '<span title="Built-in column">🔒</span>'
                 : '<button class="danger" data-del="' + esc(c.key) + '" title="Remove column">✕</button>') +
@@ -1422,7 +1611,7 @@ function openColumnsModal(){
   }).join("");
 
   const body =
-    '<p class="hint">The built-in columns suit a soil-sensor battery check. Rename them, hide them, or add your own (e.g. “Moisture %”, “Soil temp”, “Firmware”).</p>' +
+    '<p class="hint">The built-in columns suit a soil-sensor battery check. Rename them, hide them, or add your own (e.g. “Moisture %”, “Soil temp”, “Firmware”). Enable <b>Photos</b> to attach images; with Chrome or Edge they are written to an <code>assets/</code> folder and only their paths are saved in the project.</p>' +
     '<div id="colList">' + rows + '</div>' +
     '<div style="margin-top:12px"><button id="addCol">＋ Add custom column</button></div>';
 
@@ -1441,7 +1630,10 @@ function openColumnsModal(){
           if(nt !== c.type){
             c.type = nt;
             if(nt === "select" && !c.options) c.options = ["Option A", "Option B"];
-            state.points.forEach(p => { if(p.cols[c.key] === undefined) p.cols[c.key] = ""; });
+            state.points.forEach(p => {
+              if(nt === "photos") p.cols[c.key] = photoList(p.cols[c.key]);
+              else if(p.cols[c.key] === undefined || Array.isArray(p.cols[c.key])) p.cols[c.key] = "";
+            });
           }
         }
         const oin = row.querySelector("[data-opt]");
@@ -1510,6 +1702,7 @@ function exportCsv(){
       p.y === null ? "" : (p.y * 100).toFixed(2)
     ].concat(cols.map(c => {
       const v = p.cols[c.key];
+      if(isPhotoColumn(c)) return photoList(v).join("; ");
       return v === undefined || v === null ? "" : v;
     }));
     lines.push(row.map(csvEscape).join(","));
@@ -1563,7 +1756,7 @@ async function importProject(file){
     state.points = data.points || [];
     state.columns = adoptColumns(data.columns);
     state.selectedId = null;
-    state.points.forEach(p => { if(!p.cols) p.cols = {}; p.id = p.id || nextId(); });
+    state.points.forEach(p => { if(!p.cols) p.cols = {}; p.id = p.id || nextId(); normalizePointPhotos(p); });
     if(data.map && data.map.dataUrl){
       await setMap({ name:data.map.name, dataUrl:data.map.dataUrl, w:data.map.w, h:data.map.h }, data.map.dataUrl);
       await persistMap(data.map);
@@ -1730,7 +1923,7 @@ async function boot(){
   if(embedded){
     state.points = embedded.points || [];
     state.columns = adoptColumns(embedded.columns);
-    state.points.forEach(p => { if(!p.cols) p.cols = {}; p.id = p.id || nextId(); });
+    state.points.forEach(p => { if(!p.cols) p.cols = {}; p.id = p.id || nextId(); normalizePointPhotos(p); });
     if(embedded.map && embedded.map.dataUrl){
       await setMap({ name:embedded.map.name, dataUrl:embedded.map.dataUrl, w:embedded.map.w, h:embedded.map.h }, embedded.map.dataUrl);
     }
@@ -1746,7 +1939,7 @@ async function boot(){
     state.points = local.points || [];
     state.columns = adoptColumns(local.columns);
     state.gridOn = !!local.gridOn;
-    state.points.forEach(p => { if(!p.cols) p.cols = {}; });
+    state.points.forEach(p => { if(!p.cols) p.cols = {}; normalizePointPhotos(p); });
   }
   $("#btnGrid").classList.toggle("active", state.gridOn);
   $("#btnGrid2").classList.toggle("active", state.gridOn);
