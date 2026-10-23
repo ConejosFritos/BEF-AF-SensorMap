@@ -257,6 +257,9 @@
   .cell-input{border-color:transparent;background:transparent}
   .cell-input:hover{border-color:var(--border);background:var(--bg)}
   .cell-input:focus{background:var(--bg)}
+  #tbody input[data-col="batteryPct"]{-moz-appearance:textfield;appearance:textfield}
+  #tbody input[data-col="batteryPct"]::-webkit-outer-spin-button,
+  #tbody input[data-col="batteryPct"]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
   .batt{display:flex;align-items:center;gap:6px;justify-content:flex-end}
   .batt .bar{width:44px;height:6px;border-radius:4px;background:#232c38;overflow:hidden;flex:none}
   .batt .bar i{display:block;height:100%;background:var(--good);transition:width .15s}
@@ -458,6 +461,7 @@ const STATUS = {
   other:   { label:"Other",         color:"#388bfd" }
 };
 const LOW_BATTERY = 20;
+const VOLTAGE_CURVE = { minVolt:3.5, maxVolt:4.74, minPct:10, maxPct:100 };
 
 /* ============================================================
    State
@@ -544,6 +548,23 @@ function num(v){
   if(v === "" || v === null || v === undefined) return null;
   const n = Number(v);
   return isFinite(n) ? n : null;
+}
+function voltageColumn(){
+  return state.columns.find(c => /volt/i.test(String(c.key || "") + " " + String(c.label || "")));
+}
+function voltageToPercent(v){
+  const n = num(v);
+  if(n === null) return null;
+  const k = VOLTAGE_CURVE;
+  const pct = k.minPct + (n - k.minVolt) * (k.maxPct - k.minPct) / (k.maxVolt - k.minVolt);
+  return clamp(Math.round(pct), 0, 100);
+}
+function percentToVoltage(pct){
+  const n = num(pct);
+  if(n === null) return null;
+  const k = VOLTAGE_CURVE;
+  const v = k.minVolt + (clamp(n, 0, 100) - k.minPct) * (k.maxVolt - k.minVolt) / (k.maxPct - k.minPct);
+  return Math.round(v * 100) / 100;
 }
 
 /* ============================================================
@@ -898,13 +919,28 @@ function makeEditor(p, c, extraClass){
   return el;
 }
 
+function setCellInputValue(p, key, value){
+  const el = tbody.querySelector('tr[data-id="' + p.id + '"] [data-col="' + key + '"]');
+  if(el) el.value = value === null || value === undefined ? "" : value;
+}
+
 function onCellChanged(p, c){
+  const vc = voltageColumn();
+  if(c.key === "batteryPct" && vc){
+    const v = percentToVoltage(p.cols.batteryPct);
+    p.cols[vc.key] = v === null ? "" : v;
+    setCellInputValue(p, vc.key, p.cols[vc.key]);
+  }else if(vc && c.key === vc.key){
+    const pct = voltageToPercent(p.cols[vc.key]);
+    p.cols.batteryPct = pct === null ? "" : pct;
+    setCellInputValue(p, "batteryPct", p.cols.batteryPct);
+  }
   if(c.key === "condition"){
     const wrap = tbody.querySelector('tr[data-id="' + p.id + '"] .cond');
     if(wrap) wrap.className = "cond c-" + statusOf(p.cols.condition);
   }
   if(c.key === "condition" || c.key === "sensorId" || c.key === "location") updateMarkerStyle(p.id);
-  if(c.key === "batteryPct") updateBatteryBar(p);
+  if(c.key === "batteryPct" || (vc && c.key === vc.key)) updateBatteryBar(p);
   renderSummary();
   save();
 }
