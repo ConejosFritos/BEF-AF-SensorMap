@@ -1139,6 +1139,7 @@ function renderBody(){
 }
 
 let pendingPhoto = null;
+let pendingAssetsDir = null;
 let assetsDirHandle = null;
 
 function uniquePhotoName(name){
@@ -1149,6 +1150,7 @@ function uniquePhotoName(name){
 
 async function getAssetsDir(){
   if(assetsDirHandle) return assetsDirHandle;
+  if(typeof window.showDirectoryPicker !== "function") return null;
   const stored = await idbGet("assetsDir");
   if(stored){
     assetsDirHandle = stored;
@@ -1158,16 +1160,24 @@ async function getAssetsDir(){
     }catch(e){}
     assetsDirHandle = null;
   }
-  if(typeof window.showDirectoryPicker !== "function") return null;
-  const root = await window.showDirectoryPicker({ id:"soil-sensor-assets", mode:"readwrite" });
-  const assets = await root.getDirectoryHandle("assets", { create:true });
-  assetsDirHandle = assets;
-  await idbSet("assetsDir", assets);
-  return assets;
+  try{
+    const root = await window.showDirectoryPicker({ id:"soil-sensor-assets", mode:"readwrite" });
+    const assets = await root.getDirectoryHandle("assets", { create:true });
+    assetsDirHandle = assets;
+    await idbSet("assetsDir", assets);
+    return assets;
+  }catch(e){
+    return null;
+  }
 }
 
-function addPhotos(p, c){
+async function addPhotos(p, c){
   pendingPhoto = { p, c };
+  try{
+    pendingAssetsDir = await getAssetsDir();
+  }catch(e){
+    pendingAssetsDir = null;
+  }
   const input = $("#filePhotos");
   input.value = "";
   input.click();
@@ -1175,19 +1185,14 @@ function addPhotos(p, c){
 
 async function handlePhotoFiles(files){
   const target = pendingPhoto;
+  const dir = pendingAssetsDir;
   pendingPhoto = null;
+  pendingAssetsDir = null;
   if(!target || !files.length) return;
   const { p, c } = target;
-  let dir = null;
-  if(typeof window.showDirectoryPicker === "function"){
-    try{
-      dir = await getAssetsDir();
-    }catch(e){
-      dir = null;
-    }
-  }
   const paths = photoList(p.cols[c.key]).slice();
   let added = 0;
+  let saved = 0;
   for(const file of files){
     if(!/^image\//.test(file.type)) continue;
     const name = uniquePhotoName(file.name);
@@ -1198,10 +1203,8 @@ async function handlePhotoFiles(files){
         const w = await fh.createWritable();
         await w.write(file);
         await w.close();
-      }catch(e){
-        toast("Could not save " + file.name + " to the assets folder.");
-        continue;
-      }
+        saved++;
+      }catch(e){}
     }
     try{
       const dataUrl = await readFileAsDataURL(file);
@@ -1214,7 +1217,12 @@ async function handlePhotoFiles(files){
   save();
   renderBody();
   if(added){
-    toast(added + (added === 1 ? " photo added." : " photos added.") + (dir ? "" : " Saved in this browser only — no assets folder selected."));
+    const where = saved === added
+      ? " — saved to assets/."
+      : saved
+        ? " — " + saved + " saved to assets/, the rest in this browser only."
+        : " Saved in this browser only.";
+    toast(added + (added === 1 ? " photo added." : " photos added.") + where);
   }
 }
 
@@ -1611,7 +1619,7 @@ function openColumnsModal(){
   }).join("");
 
   const body =
-    '<p class="hint">The built-in columns suit a soil-sensor battery check. Rename them, hide them, or add your own (e.g. “Moisture %”, “Soil temp”, “Firmware”). Enable <b>Photos</b> to attach images; with Chrome or Edge they are written to an <code>assets/</code> folder and only their paths are saved in the project.</p>' +
+    '<p class="hint">The built-in columns suit a soil-sensor battery check. Rename them, hide them, or add your own (e.g. “Moisture %”, “Soil temp”, “Firmware”). Enable <b>Photos</b> to attach images. With Chrome or Edge you will be asked to choose a folder the first time; pick the project folder that contains <code>index.html</code> so the images are written into its <code>assets/</code> folder. If you skip that step, photos stay in this browser only.</p>' +
     '<div id="colList">' + rows + '</div>' +
     '<div style="margin-top:12px"><button id="addCol">＋ Add custom column</button></div>';
 
